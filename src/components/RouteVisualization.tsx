@@ -8,6 +8,8 @@ import {
 } from '@vis.gl/react-google-maps';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { SaleEntry, Recipe, CompanyInvoiceSettings, UserRole, SalesVisitRecord, VisitBillingStatus, UnsoldReason } from '../types';
 import { 
   MapPin, 
@@ -123,6 +125,189 @@ function calculateBearing(lat1: number, lon1: number, lat2: number, lon2: number
   return (brng + 360) % 360;
 }
 
+// Source: Google Maps Platform Code Assist
+function GoogleMapController({ onMapLoad }: { onMapLoad: (map: google.maps.Map | null) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    onMapLoad(map);
+    return () => {
+      onMapLoad(null);
+    };
+  }, [map, onMapLoad]);
+  return null;
+}
+
+// Source: Google Maps Platform Code Assist
+function GoogleMapBoundsController({
+  routeStops,
+  playbackStep,
+  highlightedStopId,
+  depot,
+}: {
+  routeStops: ParsedRouteStop[];
+  playbackStep: number;
+  highlightedStopId: string | null;
+  depot: { latitude: number; longitude: number };
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!map) return;
+    if (routeStops.length === 0) {
+      map.setCenter({ lat: depot.latitude, lng: depot.longitude });
+      map.setZoom(13);
+      return;
+    }
+
+    const bounds = new google.maps.LatLngBounds();
+    bounds.extend({ lat: depot.latitude, lng: depot.longitude });
+    routeStops.forEach(stop => {
+      bounds.extend({ lat: stop.latitude, lng: stop.longitude });
+    });
+
+    map.fitBounds(bounds, { top: 60, right: 60, bottom: 60, left: 60 });
+  }, [map, routeStops, depot]);
+
+  useEffect(() => {
+    if (!map) return;
+    if (playbackStep >= 0 && playbackStep < routeStops.length) {
+      const stop = routeStops[playbackStep];
+      map.panTo({ lat: stop.latitude, lng: stop.longitude });
+      map.setZoom(16);
+    } else if (highlightedStopId) {
+      const stop = routeStops.find(s => s.id === highlightedStopId);
+      if (stop) {
+        map.panTo({ lat: stop.latitude, lng: stop.longitude });
+      }
+    }
+  }, [map, playbackStep, highlightedStopId, routeStops]);
+
+  return null;
+}
+
+// Source: Google Maps Platform Code Assist
+function GoogleMapPolylinesAndGeofence({
+  routeStops,
+  depot,
+  showPolylines,
+  highlightedStopId,
+  geofenceRadius,
+}: {
+  routeStops: ParsedRouteStop[];
+  depot: { latitude: number; longitude: number };
+  showPolylines: boolean;
+  highlightedStopId: string | null;
+  geofenceRadius: number;
+}) {
+  const map = useMap();
+  const polylineRef = useRef<google.maps.Polyline | null>(null);
+  const deviationPolylinesRef = useRef<google.maps.Polyline[]>([]);
+  const circleRef = useRef<google.maps.Circle | null>(null);
+
+  useEffect(() => {
+    if (!map) return;
+
+    if (polylineRef.current) {
+      polylineRef.current.setMap(null);
+      polylineRef.current = null;
+    }
+    deviationPolylinesRef.current.forEach(p => p.setMap(null));
+    deviationPolylinesRef.current = [];
+
+    if (!showPolylines || routeStops.length === 0) return;
+
+    const path = [
+      { lat: depot.latitude, lng: depot.longitude },
+      ...routeStops.map(s => ({ lat: s.latitude, lng: s.longitude })),
+    ];
+
+    const arrowSymbol: google.maps.Symbol = {
+      path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+      scale: 3,
+      strokeColor: '#312e81',
+      fillColor: '#818cf8',
+      fillOpacity: 1,
+      strokeWeight: 1,
+    };
+
+    const polyline = new google.maps.Polyline({
+      path,
+      geodesic: true,
+      strokeColor: '#4f46e5',
+      strokeOpacity: 0.85,
+      strokeWeight: 4,
+      icons: [
+        {
+          icon: arrowSymbol,
+          offset: '30px',
+          repeat: '90px',
+        },
+      ],
+      map,
+    });
+    polylineRef.current = polyline;
+
+    for (let i = 0; i < routeStops.length; i++) {
+      const stop = routeStops[i];
+      if (stop.isDeviation) {
+        const fromCoord = i === 0
+          ? { lat: depot.latitude, lng: depot.longitude }
+          : { lat: routeStops[i - 1].latitude, lng: routeStops[i - 1].longitude };
+        const toCoord = { lat: stop.latitude, lng: stop.longitude };
+
+        const devLine = new google.maps.Polyline({
+          path: [fromCoord, toCoord],
+          strokeColor: '#e11d48',
+          strokeOpacity: 0.95,
+          strokeWeight: 5,
+          map,
+        });
+        deviationPolylinesRef.current.push(devLine);
+      }
+    }
+
+    return () => {
+      if (polylineRef.current) {
+        polylineRef.current.setMap(null);
+      }
+      deviationPolylinesRef.current.forEach(p => p.setMap(null));
+    };
+  }, [map, routeStops, depot, showPolylines]);
+
+  useEffect(() => {
+    if (!map) return;
+
+    if (circleRef.current) {
+      circleRef.current.setMap(null);
+      circleRef.current = null;
+    }
+
+    if (highlightedStopId) {
+      const active = routeStops.find(s => s.id === highlightedStopId);
+      if (active) {
+        circleRef.current = new google.maps.Circle({
+          strokeColor: '#6366f1',
+          strokeOpacity: 0.8,
+          strokeWeight: 1.5,
+          fillColor: '#818cf8',
+          fillOpacity: 0.18,
+          map,
+          center: { lat: active.latitude, lng: active.longitude },
+          radius: geofenceRadius,
+        });
+      }
+    }
+
+    return () => {
+      if (circleRef.current) {
+        circleRef.current.setMap(null);
+      }
+    };
+  }, [map, highlightedStopId, routeStops, geofenceRadius]);
+
+  return null;
+}
+
 export default function RouteVisualization({
   salesEntries,
   companySettings,
@@ -202,6 +387,10 @@ export default function RouteVisualization({
     localStorage.setItem('snack_sales_visits', JSON.stringify(visits));
   }, [visits]);
 
+  // Selected stop for InfoWindow in Google Maps & card highlight
+  const [selectedStopForInfo, setSelectedStopForInfo] = useState<ParsedRouteStop | null>(null);
+  const [googleMapInstance, setGoogleMapInstance] = useState<google.maps.Map | null>(null);
+
   // Map Settings Configuration State
   const [mapSettings, setMapSettings] = useState<{
     showBilled: boolean;
@@ -209,11 +398,20 @@ export default function RouteVisualization({
     showApproaching: boolean;
     geofenceRadiusMeters: number;
     showPolylines: boolean;
+    mapEngine: 'google' | 'leaflet';
+    googleMapType: 'roadmap' | 'satellite' | 'hybrid' | 'terrain';
     mapTileLayer: 'standard' | 'satellite';
   }>(() => {
     const saved = localStorage.getItem('snack_map_settings');
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) { }
+      try {
+        const parsed = JSON.parse(saved);
+        return {
+          mapEngine: 'google',
+          googleMapType: 'roadmap',
+          ...parsed,
+        };
+      } catch (e) { }
     }
     return {
       showBilled: true,
@@ -221,6 +419,8 @@ export default function RouteVisualization({
       showApproaching: true,
       geofenceRadiusMeters: 50,
       showPolylines: true,
+      mapEngine: 'google',
+      googleMapType: 'roadmap',
       mapTileLayer: 'standard',
     };
   });
@@ -373,7 +573,10 @@ export default function RouteVisualization({
     setCounterCoords(null);
 
     // Pan map to new approached shop
-    if (mapInstanceRef.current) {
+    if (mapSettings.mapEngine === 'google' && googleMapInstance) {
+      googleMapInstance.panTo({ lat, lng });
+      googleMapInstance.setZoom(16);
+    } else if (mapInstanceRef.current) {
       mapInstanceRef.current.setView([lat, lng], 15, { animate: true });
     }
   };
@@ -1349,8 +1552,14 @@ export default function RouteVisualization({
         }
         const next = prev + 1;
         const targetStop = routeStops[next];
-        if (targetStop && mapInstanceRef.current) {
-          mapInstanceRef.current.panTo([targetStop.latitude, targetStop.longitude], { animate: true });
+        if (targetStop) {
+          setHighlightedStopId(targetStop.id);
+          setSelectedStopForInfo(targetStop);
+          if (mapSettings.mapEngine === 'google' && googleMapInstance) {
+            googleMapInstance.panTo({ lat: targetStop.latitude, lng: targetStop.longitude });
+          } else if (mapInstanceRef.current) {
+            mapInstanceRef.current.panTo([targetStop.latitude, targetStop.longitude], { animate: true });
+          }
         }
         return next;
       });
@@ -1359,7 +1568,7 @@ export default function RouteVisualization({
     return () => {
       if (playbackTimerRef.current) clearInterval(playbackTimerRef.current);
     };
-  }, [isPlaying, routeStops]);
+  }, [isPlaying, routeStops, mapSettings.mapEngine, googleMapInstance]);
 
   const togglePlayback = () => {
     if (isPlaying) {
@@ -1376,7 +1585,13 @@ export default function RouteVisualization({
     setIsPlaying(false);
     setPlaybackStep(-1);
     setHighlightedStopId(null);
-    if (mapInstanceRef.current && routeStops.length > 0) {
+    setSelectedStopForInfo(null);
+    if (mapSettings.mapEngine === 'google' && googleMapInstance && routeStops.length > 0) {
+      const bounds = new google.maps.LatLngBounds();
+      bounds.extend({ lat: DEFAULT_DEPOT.latitude, lng: DEFAULT_DEPOT.longitude });
+      routeStops.forEach(s => bounds.extend({ lat: s.latitude, lng: s.longitude }));
+      googleMapInstance.fitBounds(bounds, { top: 50, right: 50, bottom: 50, left: 50 });
+    } else if (mapInstanceRef.current && routeStops.length > 0) {
       const allCoords: L.LatLngTuple[] = [
         [DEFAULT_DEPOT.latitude, DEFAULT_DEPOT.longitude],
         ...routeStops.map(s => [s.latitude, s.longitude] as L.LatLngTuple)
@@ -1387,7 +1602,11 @@ export default function RouteVisualization({
 
   const handleSelectStop = (stop: ParsedRouteStop) => {
     setHighlightedStopId(stop.id);
-    if (mapInstanceRef.current) {
+    setSelectedStopForInfo(stop);
+    if (mapSettings.mapEngine === 'google' && googleMapInstance) {
+      googleMapInstance.panTo({ lat: stop.latitude, lng: stop.longitude });
+      googleMapInstance.setZoom(16);
+    } else if (mapInstanceRef.current) {
       mapInstanceRef.current.setView([stop.latitude, stop.longitude], 15, { animate: true });
     }
   };
@@ -1760,49 +1979,353 @@ export default function RouteVisualization({
       {/* Main Content Grid: Interactive Map + Sequential Itinerary Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         
-        {/* Left Column: Interactive Leaflet Polyline Map (8 Cols) */}
+        {/* Left Column: Interactive Map with Google Maps & Leaflet (8 Cols) */}
         <div className="lg:col-span-8 flex flex-col bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           
-          {/* Map Top Bar with Playback & Controls */}
+          {/* Map Top Bar with Engine Selector, View Types & Playback Controls */}
           <div className="p-3 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-3 border-b border-slate-800">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span className="text-xs font-bold tracking-wide">Interactive Delivery Route Polyline</span>
+              <span className="text-xs font-bold tracking-wide">Route Tracking & Polyline</span>
               {routeStops.length > 0 && (
                 <span className="text-[11px] text-slate-400 font-mono">
-                  ({routeStops.length} stores sequence)
+                  ({routeStops.length} stops)
                 </span>
               )}
             </div>
 
-            {/* Playback Simulation Buttons */}
-            {routeStops.length > 0 && (
-              <div className="flex items-center gap-1.5">
+            {/* Map Engine & Mode Toggles */}
+            <div className="flex items-center flex-wrap gap-2">
+              {/* Engine Switcher */}
+              <div className="flex items-center bg-slate-800/90 p-0.5 rounded-lg border border-slate-700">
                 <button
                   type="button"
-                  onClick={togglePlayback}
-                  className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
-                  title="Simulate salesperson moving from stop to stop"
+                  onClick={() => setMapSettings(prev => ({ ...prev, mapEngine: 'google' }))}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
+                    mapSettings.mapEngine === 'google'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Google Maps Platform (Official Interactive Vector Maps)"
                 >
-                  {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                  <span>{isPlaying ? 'Pause Simulation' : 'Simulate Route Tour'}</span>
+                  <span>🗺️ Google Maps</span>
+                  <span className="text-[9px] px-1 py-0.2 bg-emerald-400/20 text-emerald-300 rounded font-semibold uppercase tracking-wider">Active</span>
                 </button>
-
                 <button
                   type="button"
-                  onClick={resetPlayback}
-                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition-colors cursor-pointer"
-                  title="Reset view to whole route bounds"
+                  onClick={() => {
+                    setMapSettings(prev => ({ ...prev, mapEngine: 'leaflet' }));
+                    setTimeout(() => mapInstanceRef.current?.invalidateSize(), 150);
+                  }}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
+                    mapSettings.mapEngine === 'leaflet'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="OpenStreetMap via Leaflet (Offline/Fallback)"
                 >
-                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>🌐 OpenStreetMap</span>
                 </button>
               </div>
-            )}
+
+              {/* Google Maps View Type Pills */}
+              {mapSettings.mapEngine === 'google' && (
+                <div className="hidden sm:flex items-center bg-slate-800/80 p-0.5 rounded-lg border border-slate-700 text-[11px]">
+                  {(['roadmap', 'satellite', 'hybrid', 'terrain'] as const).map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setMapSettings(prev => ({ ...prev, googleMapType: type }))}
+                      className={`px-2 py-0.5 rounded font-medium capitalize transition-colors cursor-pointer ${
+                        (mapSettings.googleMapType || 'roadmap') === type
+                          ? 'bg-indigo-700 text-white font-bold'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      {type}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Playback Simulation Buttons */}
+              {routeStops.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={togglePlayback}
+                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                    title="Simulate salesperson moving from stop to stop"
+                  >
+                    {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                    <span>{isPlaying ? 'Pause' : 'Tour'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={resetPlayback}
+                    className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs transition-colors cursor-pointer"
+                    title="Reset view to whole route bounds"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              {/* Settings button */}
+              <button
+                type="button"
+                onClick={() => setShowMapSettingsModal(true)}
+                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer"
+                title="Configure Map Settings, layers & geofence"
+              >
+                <Sliders className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
-          {/* Leaflet Map Canvas Container */}
-          <div className="relative w-full h-[520px] bg-slate-100">
-            <div ref={mapContainerRef} className="w-full h-full z-0" />
+          {/* Interactive Map Canvas Container */}
+          <div className="relative w-full h-[560px] bg-slate-100">
+            {/* 1. GOOGLE MAPS PLATFORM VIEW */}
+            {mapSettings.mapEngine === 'google' && (
+              <div className="w-full h-full relative">
+                <APIProvider apiKey={GOOGLE_MAPS_API_KEY} libraries={['places', 'marker', 'geometry', 'routes']}>
+                  <Map
+                    mapId="DEMO_MAP_ID"
+                    internalUsageAttributionIds={["gmp_mcp_codeassist_v1_aistudio"]}
+                    defaultCenter={{ lat: DEFAULT_DEPOT.latitude, lng: DEFAULT_DEPOT.longitude }}
+                    defaultZoom={13}
+                    mapTypeId={mapSettings.googleMapType || 'roadmap'}
+                    gestureHandling="greedy"
+                    disableDefaultUI={false}
+                    zoomControl={true}
+                    fullscreenControl={true}
+                    streetViewControl={true}
+                    mapTypeControl={false}
+                    style={{ width: '100%', height: '100%' }}
+                  >
+                    <GoogleMapController onMapLoad={setGoogleMapInstance} />
+                    <GoogleMapBoundsController
+                      routeStops={routeStops}
+                      playbackStep={playbackStep}
+                      highlightedStopId={highlightedStopId}
+                      depot={DEFAULT_DEPOT}
+                    />
+                    <GoogleMapPolylinesAndGeofence
+                      routeStops={routeStops}
+                      depot={DEFAULT_DEPOT}
+                      showPolylines={mapSettings.showPolylines}
+                      highlightedStopId={highlightedStopId}
+                      geofenceRadius={mapSettings.geofenceRadiusMeters}
+                    />
+
+                    {/* Central Factory Depot Marker */}
+                    <AdvancedMarker
+                      position={{ lat: DEFAULT_DEPOT.latitude, lng: DEFAULT_DEPOT.longitude }}
+                      title={DEFAULT_DEPOT.name}
+                      onClick={() => {
+                        setHighlightedStopId(null);
+                        setSelectedStopForInfo(null);
+                      }}
+                    >
+                      <div className="relative group cursor-pointer">
+                        <div className="w-10 h-10 rounded-full bg-slate-900 border-2 border-sky-400 text-white flex items-center justify-center text-lg shadow-xl hover:scale-110 transition-transform">
+                          🏭
+                        </div>
+                        <div className="absolute -bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap bg-slate-900/90 text-sky-300 text-[10px] font-bold px-1.5 py-0.5 rounded shadow">
+                          Central Depot
+                        </div>
+                      </div>
+                    </AdvancedMarker>
+
+                    {/* Route Stop Markers */}
+                    {routeStops.map((stop, index) => {
+                      const isCurrentPlayback = playbackStep === index;
+                      const isSelected = highlightedStopId === stop.id;
+
+                      let badgeBg = stop.visitStatus === 'billed'
+                        ? stop.isDeviation ? 'bg-rose-600 border-rose-300 text-white' : 'bg-emerald-600 border-emerald-300 text-white'
+                        : stop.visitStatus === 'unsold'
+                        ? 'bg-amber-600 border-amber-300 text-white'
+                        : 'bg-blue-600 border-blue-300 text-white';
+
+                      if (isSelected || isCurrentPlayback) {
+                        badgeBg = 'bg-indigo-600 border-indigo-200 text-white ring-4 ring-indigo-400 scale-110 shadow-2xl';
+                      }
+
+                      return (
+                        <AdvancedMarker
+                          key={stop.id}
+                          position={{ lat: stop.latitude, lng: stop.longitude }}
+                          title={`${stop.sequenceNumber}. ${stop.storeName}`}
+                          onClick={() => {
+                            setHighlightedStopId(stop.id);
+                            setSelectedStopForInfo(stop);
+                          }}
+                        >
+                          <div className="relative cursor-pointer group">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-extrabold text-xs shadow-md border-2 transition-all ${badgeBg}`}>
+                              {stop.visitStatus === 'billed' ? (
+                                <span>₹{stop.sequenceNumber}</span>
+                              ) : stop.visitStatus === 'unsold' ? (
+                                <span>✕{stop.sequenceNumber}</span>
+                              ) : (
+                                <span>🏪</span>
+                              )}
+                            </div>
+
+                            {/* Radar pulse for approaching prospective shops */}
+                            {stop.visitStatus === 'approaching' && (
+                              <span className="absolute -inset-1 rounded-full border-2 border-blue-500 animate-ping opacity-75 pointer-events-none"></span>
+                            )}
+
+                            {/* Deviation Alert icon */}
+                            {stop.isDeviation && (
+                              <span className="absolute -top-1 -right-1 bg-amber-500 text-white w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-black border border-white shadow">
+                                !
+                              </span>
+                            )}
+                          </div>
+                        </AdvancedMarker>
+                      );
+                    })}
+
+                    {/* Rich Interactive InfoWindow on Stop Click */}
+                    {selectedStopForInfo && (
+                      <InfoWindow
+                        position={{ lat: selectedStopForInfo.latitude, lng: selectedStopForInfo.longitude }}
+                        onCloseClick={() => setSelectedStopForInfo(null)}
+                      >
+                        <div className="p-1 min-w-[240px] max-w-[280px] font-sans text-slate-800">
+                          <div className="flex items-center justify-between gap-2 mb-1.5 pb-1 border-b border-slate-200">
+                            <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                              selectedStopForInfo.visitStatus === 'billed'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : selectedStopForInfo.visitStatus === 'unsold'
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-blue-100 text-blue-800'
+                            }`}>
+                              {selectedStopForInfo.visitStatus === 'billed' ? '🟢 Billed Sale' : selectedStopForInfo.visitStatus === 'unsold' ? '🟠 Unsold Visit' : '🔵 Approaching'}
+                            </span>
+                            <span className="font-mono text-xs font-bold text-slate-500">
+                              #{selectedStopForInfo.sequenceNumber} • {selectedStopForInfo.timeString}
+                            </span>
+                          </div>
+
+                          <h4 className="font-extrabold text-sm text-slate-900 leading-snug">{selectedStopForInfo.storeName}</h4>
+                          <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{selectedStopForInfo.address}</p>
+
+                          {selectedStopForInfo.phone && (
+                            <div className="flex items-center gap-1.5 text-xs text-indigo-600 font-semibold mt-1">
+                              <Phone className="w-3 h-3" />
+                              <a href={`tel:${selectedStopForInfo.phone}`} className="hover:underline">{selectedStopForInfo.phone}</a>
+                            </div>
+                          )}
+
+                          {selectedStopForInfo.visitStatus === 'billed' ? (
+                            <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 my-2 space-y-1">
+                              <div className="flex justify-between text-xs">
+                                <span className="text-slate-500">Invoice Total:</span>
+                                <span className="font-extrabold text-emerald-700">₹{selectedStopForInfo.totalAmount.toLocaleString('en-IN')}</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                <span className="text-slate-500">Invoice Ref:</span>
+                                <span className="font-mono font-bold text-indigo-600">{selectedStopForInfo.invoiceNumber || 'INV'}</span>
+                              </div>
+                            </div>
+                          ) : selectedStopForInfo.visitStatus === 'unsold' ? (
+                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 my-2 text-xs">
+                              <div className="font-bold text-amber-900">Reason: {selectedStopForInfo.unsoldReason || 'No Sale'}</div>
+                              {selectedStopForInfo.unsoldNotes && (
+                                <div className="text-[11px] text-amber-800 mt-0.5 italic">"{selectedStopForInfo.unsoldNotes}"</div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 my-2 text-xs">
+                              <div className="font-bold text-blue-900">Category: {selectedStopForInfo.shopCategory || 'Retail Outlet'}</div>
+                              {selectedStopForInfo.unsoldNotes && (
+                                <div className="text-[11px] text-blue-800 mt-0.5">{selectedStopForInfo.unsoldNotes}</div>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between text-[11px] text-slate-500 mb-2">
+                            <span>Leg: +{selectedStopForInfo.distanceFromPrevKm.toFixed(1)} km</span>
+                            <span>GPS: {selectedStopForInfo.hasDeviceGps ? '📍 Device Locked' : 'Approximate'}</span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-100">
+                            {selectedStopForInfo.visitStatus === 'approaching' ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleOpenBillModalForStop(selectedStopForInfo);
+                                    setSelectedStopForInfo(null);
+                                  }}
+                                  className="flex-1 py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold transition-colors cursor-pointer"
+                                >
+                                  🧾 Bill Sale
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleOpenUnsoldModalForStop(selectedStopForInfo);
+                                    setSelectedStopForInfo(null);
+                                  }}
+                                  className="flex-1 py-1 px-2 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-bold transition-colors cursor-pointer"
+                                >
+                                  ✕ Unsold
+                                </button>
+                              </>
+                            ) : selectedStopForInfo.visitStatus === 'unsold' ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleOpenBillModalForStop(selectedStopForInfo);
+                                  setSelectedStopForInfo(null);
+                                }}
+                                className="flex-1 py-1 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold transition-colors cursor-pointer"
+                              >
+                                🧾 Re-bill
+                              </button>
+                            ) : (
+                              selectedStopForInfo.sale && onSelectInvoice && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onSelectInvoice(selectedStopForInfo.sale!);
+                                    setSelectedStopForInfo(null);
+                                  }}
+                                  className="flex-1 py-1 px-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded text-xs font-bold transition-colors cursor-pointer"
+                                >
+                                  📄 Invoice
+                                </button>
+                              )
+                            )}
+                            <a
+                              href={`https://www.google.com/maps/dir/?api=1&destination=${selectedStopForInfo.latitude},${selectedStopForInfo.longitude}&travelmode=driving`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1 px-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-xs font-bold flex items-center gap-1 transition-colors"
+                              title="Open Directions in Google Maps"
+                            >
+                              <span>Nav</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
+                        </div>
+                      </InfoWindow>
+                    )}
+                  </Map>
+                </APIProvider>
+              </div>
+            )}
+
+            {/* 2. LEAFLET OPENSTREETMAP VIEW */}
+            <div className={`w-full h-full ${mapSettings.mapEngine === 'leaflet' ? 'block' : 'hidden'}`}>
+              <div ref={mapContainerRef} className="w-full h-full z-0" />
+            </div>
 
             {/* Empty State Overlay */}
             {routeStops.length === 0 && (
@@ -1850,7 +2373,7 @@ export default function RouteVisualization({
           <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
             <div className="flex items-center gap-1.5">
               <Compass className="w-4 h-4 text-indigo-600" />
-              <span><strong>Directional Polyline:</strong> Stores are automatically connected in chronological invoice sequence.</span>
+              <span><strong>Directional Polyline:</strong> Powered by {mapSettings.mapEngine === 'google' ? 'Google Maps Platform' : 'OpenStreetMap'}. Chronologically connected stops.</span>
             </div>
             <div className="font-mono text-[11px] text-slate-500">
               Center: {DEFAULT_DEPOT.name} ({DEFAULT_DEPOT.latitude}, {DEFAULT_DEPOT.longitude})
@@ -2726,42 +3249,118 @@ export default function RouteVisualization({
                 </div>
               </div>
 
-              {/* Map Tile Layer Style */}
+              {/* Map Engine Provider Section */}
               <div className="space-y-2.5 pt-2 border-t border-slate-100">
-                <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                  <Compass className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>Map Base Layer Style</span>
+                <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Compass className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Map Engine & Provider</span>
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    {mapSettings.mapEngine === 'google' ? 'Google Maps Platform Active' : 'Leaflet Active'}
+                  </span>
                 </h4>
 
                 <div className="grid grid-cols-2 gap-2.5">
                   <button
                     type="button"
-                    onClick={() => setMapSettings(prev => ({ ...prev, mapTileLayer: 'standard' }))}
+                    onClick={() => setMapSettings(prev => ({ ...prev, mapEngine: 'google' }))}
                     className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
-                      mapSettings.mapTileLayer === 'standard'
-                        ? 'border-indigo-600 bg-indigo-50/50 ring-2 ring-indigo-500/20 shadow-xs'
+                      mapSettings.mapEngine === 'google'
+                        ? 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-500/20 shadow-xs'
                         : 'border-slate-200 hover:bg-slate-50'
                     }`}
                   >
-                    <div className="text-base mb-1">🗺️</div>
-                    <span className="text-xs font-bold text-slate-900 block">OpenStreetMap Street</span>
-                    <span className="text-[10px] text-slate-500">Clean street names, landmarks & road grids</span>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-base">🗺️</span>
+                      <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-800">
+                        Recommended
+                      </span>
+                    </div>
+                    <span className="text-xs font-bold text-slate-900 block">Google Maps Platform</span>
+                    <span className="text-[10px] text-slate-500 leading-tight block mt-0.5">
+                      Official interactive vector maps, high-accuracy geocoding & directional arrows
+                    </span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => setMapSettings(prev => ({ ...prev, mapTileLayer: 'satellite' }))}
+                    onClick={() => {
+                      setMapSettings(prev => ({ ...prev, mapEngine: 'leaflet' }));
+                      setTimeout(() => mapInstanceRef.current?.invalidateSize(), 150);
+                    }}
                     className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
-                      mapSettings.mapTileLayer === 'satellite'
-                        ? 'border-indigo-600 bg-indigo-50/50 ring-2 ring-indigo-500/20 shadow-xs'
+                      mapSettings.mapEngine === 'leaflet'
+                        ? 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-500/20 shadow-xs'
                         : 'border-slate-200 hover:bg-slate-50'
                     }`}
                   >
-                    <div className="text-base mb-1">🛰️</div>
-                    <span className="text-xs font-bold text-slate-900 block">Esri Satellite Imagery</span>
-                    <span className="text-[10px] text-slate-500">Aerial photographic view of shops & terrain</span>
+                    <div className="text-base mb-1">🌐</div>
+                    <span className="text-xs font-bold text-slate-900 block">OpenStreetMap (Leaflet)</span>
+                    <span className="text-[10px] text-slate-500 leading-tight block mt-0.5">
+                      Open-source map tiles alternative for standard offline or fallback routing
+                    </span>
                   </button>
                 </div>
+              </div>
+
+              {/* Map Layer Style */}
+              <div className="space-y-2.5 pt-2 border-t border-slate-100">
+                <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>
+                    {mapSettings.mapEngine === 'google' ? 'Google Maps Base View Type' : 'Leaflet Tile Layer'}
+                  </span>
+                </h4>
+
+                {mapSettings.mapEngine === 'google' ? (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {(['roadmap', 'satellite', 'hybrid', 'terrain'] as const).map((type) => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setMapSettings(prev => ({ ...prev, googleMapType: type }))}
+                        className={`p-2.5 rounded-xl border text-center cursor-pointer transition-all capitalize text-xs font-bold ${
+                          (mapSettings.googleMapType || 'roadmap') === type
+                            ? 'border-indigo-600 bg-indigo-600 text-white shadow-xs'
+                            : 'border-slate-200 text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        {type === 'roadmap' ? '🗺️ Roadmap' : type === 'satellite' ? '🛰️ Satellite' : type === 'hybrid' ? '🌐 Hybrid' : '⛰️ Terrain'}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setMapSettings(prev => ({ ...prev, mapTileLayer: 'standard' }))}
+                      className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                        mapSettings.mapTileLayer === 'standard'
+                          ? 'border-indigo-600 bg-indigo-50/50 ring-2 ring-indigo-500/20 shadow-xs'
+                          : 'border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="text-base mb-1">🗺️</div>
+                      <span className="text-xs font-bold text-slate-900 block">OpenStreetMap Street</span>
+                      <span className="text-[10px] text-slate-500">Clean street names & road grids</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setMapSettings(prev => ({ ...prev, mapTileLayer: 'satellite' }))}
+                      className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                        mapSettings.mapTileLayer === 'satellite'
+                          ? 'border-indigo-600 bg-indigo-50/50 ring-2 ring-indigo-500/20 shadow-xs'
+                          : 'border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <div className="text-base mb-1">🛰️</div>
+                      <span className="text-xs font-bold text-slate-900 block">Esri Satellite Imagery</span>
+                      <span className="text-[10px] text-slate-500">Aerial photographic view</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -2774,6 +3373,8 @@ export default function RouteVisualization({
                   showApproaching: true,
                   geofenceRadiusMeters: 50,
                   showPolylines: true,
+                  mapEngine: 'google',
+                  googleMapType: 'roadmap',
                   mapTileLayer: 'standard',
                 })}
                 className="text-xs text-slate-600 hover:text-slate-900 font-semibold cursor-pointer underline"

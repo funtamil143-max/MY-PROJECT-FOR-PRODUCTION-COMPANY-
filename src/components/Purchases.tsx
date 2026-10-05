@@ -9,6 +9,7 @@ interface PurchasesProps {
   onAddBill: (bill: Omit<PurchaseBill, 'id'>) => void;
   onDeleteBill?: (id: string) => void;
   onEditBill?: (id: string, updatedBill: Omit<PurchaseBill, 'id'>) => void;
+  onClearPurchases?: () => void;
 }
 
 interface NewBillItem {
@@ -18,8 +19,9 @@ interface NewBillItem {
   isCustom?: boolean;
 }
 
-export default function Purchases({ materials, bills, onAddBill, onDeleteBill, onEditBill }: PurchasesProps) {
+export default function Purchases({ materials, bills, onAddBill, onDeleteBill, onEditBill, onClearPurchases }: PurchasesProps) {
   const [isAdding, setIsAdding] = useState(false);
+  const [showClearModal, setShowClearModal] = useState(false);
   const [supplierName, setSupplierName] = useState('');
   const [billNumber, setBillNumber] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -193,6 +195,17 @@ export default function Purchases({ materials, bills, onAddBill, onDeleteBill, o
             <FileSpreadsheet className="w-4 h-4" />
             <span>Export Excel</span>
           </button>
+          {onClearPurchases && bills.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowClearModal(true)}
+              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-sm font-semibold rounded-xl transition-all duration-150 flex items-center space-x-1.5 shadow-2xs cursor-pointer"
+              title="Clear all recorded purchase invoices"
+            >
+              <Trash className="w-4 h-4 text-rose-600" />
+              <span>Clear Bills</span>
+            </button>
+          )}
           <button
             id="log-purchase-bill-btn"
             onClick={() => setIsAdding(!isAdding)}
@@ -203,6 +216,42 @@ export default function Purchases({ materials, bills, onAddBill, onDeleteBill, o
           </button>
         </div>
       </div>
+
+      {/* Clear Confirmation Modal */}
+      {showClearModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-extrabold text-slate-900">Clear All Purchase Bills?</h3>
+              <p className="text-xs text-slate-500">
+                Are you sure you want to clear all {bills.length} recorded supplier purchase invoices?
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowClearModal(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowClearModal(false);
+                  onClearPurchases?.();
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer"
+              >
+                Confirm Clear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isAdding && (
         <form 

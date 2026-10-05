@@ -86,11 +86,13 @@ interface RecipesProps {
   onDeleteRecipe: (id: string) => void;
   onUpdatePackagingSizes?: (recipeId: string, sizes: PackagingSize[]) => void;
   onClearAllRecipesToZero?: () => void;
+  onClearRecipes?: () => void;
   canDelete?: boolean;
 }
 
-export default function Recipes({ recipes, materials, onAddRecipe, onEditRecipe, onDeleteRecipe, onUpdatePackagingSizes, onClearAllRecipesToZero }: RecipesProps) {
+export default function Recipes({ recipes, materials, onAddRecipe, onEditRecipe, onDeleteRecipe, onUpdatePackagingSizes, onClearAllRecipesToZero, onClearRecipes }: RecipesProps) {
   const [isAdding, setIsAdding] = useState(false);
+  const [showClearModal, setShowClearModal] = useState(false);
   const [activeRecipeId, setActiveRecipeId] = useState<string | null>(recipes[0]?.id || null);
   const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
   const [dropdownSelection, setDropdownSelection] = useState<string>('');
@@ -507,6 +509,17 @@ export default function Recipes({ recipes, materials, onAddRecipe, onEditRecipe,
               <span>Clear All Recipes to 0g</span>
             </button>
           )}
+          {onClearRecipes && recipes.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowClearModal(true)}
+              className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition-all flex items-center space-x-1.5 shadow-xs cursor-pointer"
+              title="Delete all recipe formulations"
+            >
+              <Trash className="w-3.5 h-3.5" />
+              <span>Clear Recipes</span>
+            </button>
+          )}
           <button
             id="new-recipe-btn"
             onClick={() => setIsAdding(!isAdding)}
@@ -517,6 +530,44 @@ export default function Recipes({ recipes, materials, onAddRecipe, onEditRecipe,
           </button>
         </div>
       </div>
+
+      {/* Clear Recipes Confirmation Modal */}
+      {showClearModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-extrabold text-slate-900">Clear All Recipes?</h3>
+              <p className="text-xs text-slate-500">
+                Are you sure you want to permanently delete all {recipes.length} recipe formulations and product formulas?
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowClearModal(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onClearRecipes) {
+                    onClearRecipes();
+                  }
+                  setShowClearModal(false);
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer"
+              >
+                Yes, Clear All Recipes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Recipe Wizard Panel */}
       {isAdding && (

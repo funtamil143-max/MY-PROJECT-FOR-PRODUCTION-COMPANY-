@@ -78,6 +78,8 @@ import SalaryManager from './components/SalaryManager';
 import DailyUsageManager from './components/DailyUsageManager';
 import MasterSettings from './components/MasterSettings';
 import RouteVisualization from './components/RouteVisualization';
+import FirebaseAuthBar from './components/FirebaseAuthBar';
+import { useFirebaseSync } from './hooks/useFirebaseSync';
 
 import LoginModal from './components/LoginModal';
 import UserProfileModal from './components/UserProfileModal';
@@ -119,6 +121,39 @@ export default function App() {
   const [dailyUsageEntries, setDailyUsageEntries] = useState<DailyUsageEntry[]>(INITIAL_DAILY_USAGE_ENTRIES);
 
   const [isInitialized, setIsInitialized] = useState(false);
+
+  // Firebase Auth & Cloud Firestore Data Sync
+  const firebaseSync = useFirebaseSync({
+    recipes,
+    salesEntries,
+    expenses,
+    companySettings,
+    onDataLoadedFromCloud: (cloudData) => {
+      if (cloudData.recipes && cloudData.recipes.length > 0) {
+        setRecipes(cloudData.recipes);
+      }
+      if (cloudData.salesEntries && cloudData.salesEntries.length > 0) {
+        setSalesEntries(cloudData.salesEntries);
+      }
+      if (cloudData.expenses && cloudData.expenses.length > 0) {
+        setExpenses(cloudData.expenses);
+      }
+    }
+  });
+
+  // Sync Firebase User profile with local currentUser
+  useEffect(() => {
+    if (firebaseSync.user) {
+      setIsLoggedIn(true);
+      setCurrentUser(prev => ({
+        ...prev,
+        id: firebaseSync.user!.uid,
+        name: firebaseSync.user!.displayName || prev.name,
+        email: firebaseSync.user!.email || prev.email,
+        photoUrl: firebaseSync.user!.photoURL || prev.photoUrl,
+      }));
+    }
+  }, [firebaseSync.user]);
 
   // Helper for adding Audit Logs
   const addAuditLog = (
@@ -882,13 +917,349 @@ export default function App() {
       },
     ];
 
+    const getPastDate = (daysAgo: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() - daysAgo);
+      return d.toISOString().split('T')[0];
+    };
+
+    // Historical multi-day and multi-month sales records for CEO revenue trend visualization
+    const historicalTrends: SaleEntry[] = [
+      {
+        id: `sale_hist_${Date.now()}_39`,
+        invoiceNumber: 'INV-2026-039',
+        customerName: 'Meenakshi Supermarket',
+        customerPhone: '+91 98421 33011',
+        customerAddress: 'South Veli St, Madurai',
+        customerType: 'Shop/Retail',
+        date: getPastDate(1),
+        time: '11:00 AM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 14500,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 14500,
+        paidAmount: 14500,
+        paymentStatus: 'Paid',
+        paymentMethod: 'UPI'
+      },
+      {
+        id: `sale_hist_${Date.now()}_40`,
+        invoiceNumber: 'INV-2026-040',
+        customerName: 'Kaveri Provisions',
+        customerPhone: '+91 98421 55099',
+        customerAddress: 'Simmakkal Market, Madurai',
+        customerType: 'Wholesaler',
+        date: getPastDate(1),
+        time: '03:30 PM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 6800,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 6800,
+        paidAmount: 4000,
+        balanceAmount: 2800,
+        paymentStatus: 'Partial',
+        paymentMethod: 'Cash'
+      },
+      {
+        id: `sale_hist_${Date.now()}_36`,
+        invoiceNumber: 'INV-2026-036',
+        customerName: 'Karthik General Merchant',
+        customerPhone: '+91 98421 88022',
+        customerAddress: 'Goripalayam, Madurai',
+        customerType: 'Wholesaler',
+        date: getPastDate(2),
+        time: '10:15 AM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 18200,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 18200,
+        paidAmount: 18200,
+        paymentStatus: 'Paid',
+        paymentMethod: 'Bank Transfer'
+      },
+      {
+        id: `sale_hist_${Date.now()}_37`,
+        invoiceNumber: 'INV-2026-037',
+        customerName: 'Shanmugam Snacks Corner',
+        customerPhone: '+91 98421 66044',
+        customerAddress: 'Anna Nagar, Madurai',
+        customerType: 'Shop/Retail',
+        date: getPastDate(2),
+        time: '02:00 PM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 9400,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 9400,
+        paidAmount: 9400,
+        paymentStatus: 'Paid',
+        paymentMethod: 'UPI'
+      },
+      {
+        id: `sale_hist_${Date.now()}_38`,
+        invoiceNumber: 'INV-2026-038',
+        customerName: 'Gomathi Departmental Store',
+        customerPhone: '+91 98421 11077',
+        customerAddress: 'K.K. Nagar, Madurai',
+        customerType: 'Wholesaler',
+        date: getPastDate(2),
+        time: '04:45 PM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 5200,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 5200,
+        paidAmount: 0,
+        balanceAmount: 5200,
+        paymentStatus: 'Pending',
+        paymentMethod: 'Credit'
+      },
+      {
+        id: `sale_hist_${Date.now()}_34`,
+        invoiceNumber: 'INV-2026-034',
+        customerName: 'Vasantham Sweets',
+        customerPhone: '+91 98421 44088',
+        customerAddress: 'Mattuthavani, Madurai',
+        customerType: 'Wholesaler',
+        date: getPastDate(3),
+        time: '11:30 AM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 12800,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 12800,
+        paidAmount: 12800,
+        paymentStatus: 'Paid',
+        paymentMethod: 'UPI'
+      },
+      {
+        id: `sale_hist_${Date.now()}_31`,
+        invoiceNumber: 'INV-2026-031',
+        customerName: 'Balaji Store',
+        customerPhone: '+91 98421 77011',
+        customerAddress: 'Sellur, Madurai',
+        customerType: 'Wholesaler',
+        date: getPastDate(5),
+        time: '09:45 AM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 16400,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 16400,
+        paidAmount: 16400,
+        paymentStatus: 'Paid',
+        paymentMethod: 'UPI'
+      },
+      {
+        id: `sale_hist_${Date.now()}_28`,
+        invoiceNumber: 'INV-2026-028',
+        customerName: 'Praveen Mart',
+        customerPhone: '+91 98421 99055',
+        customerAddress: 'Villapuram, Madurai',
+        customerType: 'Shop/Retail',
+        date: getPastDate(8),
+        time: '01:15 PM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 15000,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 15000,
+        paidAmount: 15000,
+        paymentStatus: 'Paid',
+        paymentMethod: 'UPI'
+      },
+      {
+        id: `sale_hist_${Date.now()}_25`,
+        invoiceNumber: 'INV-2026-025',
+        customerName: 'Anand Hypermarket',
+        customerPhone: '+91 98421 22033',
+        customerAddress: 'Tallakulam, Madurai',
+        customerType: 'Wholesaler',
+        date: getPastDate(12),
+        time: '10:00 AM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 22400,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 22400,
+        paidAmount: 22400,
+        paymentStatus: 'Paid',
+        paymentMethod: 'Bank Transfer'
+      },
+      {
+        id: `sale_hist_${Date.now()}_22`,
+        invoiceNumber: 'INV-2026-022',
+        customerName: 'Saravana Stores',
+        customerPhone: '+91 98421 55011',
+        customerAddress: 'Chinthamani, Madurai',
+        customerType: 'Wholesaler',
+        date: getPastDate(18),
+        time: '11:45 AM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 19500,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 19500,
+        paidAmount: 19500,
+        paymentStatus: 'Paid',
+        paymentMethod: 'UPI'
+      },
+      {
+        id: `sale_hist_${Date.now()}_19`,
+        invoiceNumber: 'INV-2026-019',
+        customerName: 'Madurai Traders',
+        customerPhone: '+91 98421 66088',
+        customerAddress: 'Tirupparankunram, Madurai',
+        customerType: 'Wholesaler',
+        date: getPastDate(25),
+        time: '02:30 PM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 21000,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 21000,
+        paidAmount: 21000,
+        paymentStatus: 'Paid',
+        paymentMethod: 'Bank Transfer'
+      },
+      // Month-over-Month historical records
+      {
+        id: `sale_hist_${Date.now()}_15`,
+        invoiceNumber: 'INV-2026-015',
+        customerName: 'Alagappa Sweets & Bakes',
+        customerPhone: '+91 98421 88099',
+        customerAddress: 'West Masi St, Madurai',
+        customerType: 'Wholesaler',
+        date: getPastDate(35),
+        time: '10:00 AM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 32000,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 32000,
+        paidAmount: 32000,
+        paymentStatus: 'Paid',
+        paymentMethod: 'Bank Transfer'
+      },
+      {
+        id: `sale_hist_${Date.now()}_16`,
+        invoiceNumber: 'INV-2026-016',
+        customerName: 'Sri Krishna Provisions',
+        customerPhone: '+91 98421 33044',
+        customerAddress: 'North Gate, Madurai',
+        customerType: 'Wholesaler',
+        date: getPastDate(42),
+        time: '03:15 PM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 28500,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 28500,
+        paidAmount: 28500,
+        paymentStatus: 'Paid',
+        paymentMethod: 'UPI'
+      },
+      {
+        id: `sale_hist_${Date.now()}_10`,
+        invoiceNumber: 'INV-2026-010',
+        customerName: 'Thirumalai Wholesale Depot',
+        customerPhone: '+91 98421 11055',
+        customerAddress: 'Vilakkuthoon, Madurai',
+        customerType: 'Wholesaler',
+        date: getPastDate(68),
+        time: '11:00 AM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 36000,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 36000,
+        paidAmount: 36000,
+        paymentStatus: 'Paid',
+        paymentMethod: 'Bank Transfer'
+      },
+      {
+        id: `sale_hist_${Date.now()}_11`,
+        invoiceNumber: 'INV-2026-011',
+        customerName: 'Pandian Express Stores',
+        customerPhone: '+91 98421 44066',
+        customerAddress: 'Central Bus Stand, Madurai',
+        customerType: 'Shop/Retail',
+        date: getPastDate(75),
+        time: '02:00 PM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 29800,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 29800,
+        paidAmount: 29800,
+        paymentStatus: 'Paid',
+        paymentMethod: 'UPI'
+      },
+      {
+        id: `sale_hist_${Date.now()}_06`,
+        invoiceNumber: 'INV-2026-006',
+        customerName: 'Royal Bakery Chain',
+        customerPhone: '+91 98421 77033',
+        customerAddress: 'Ellis Nagar, Madurai',
+        customerType: 'Wholesaler',
+        date: getPastDate(98),
+        time: '10:30 AM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 34000,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 34000,
+        paidAmount: 34000,
+        paymentStatus: 'Paid',
+        paymentMethod: 'Bank Transfer'
+      },
+      {
+        id: `sale_hist_${Date.now()}_07`,
+        invoiceNumber: 'INV-2026-007',
+        customerName: 'Maruti Provisions',
+        customerPhone: '+91 98421 99077',
+        customerAddress: 'Avaniyapuram, Madurai',
+        customerType: 'Wholesaler',
+        date: getPastDate(105),
+        time: '04:15 PM',
+        salesPerson: currentUser.name || 'K. Saravanan',
+        items: [],
+        totalAmount: 27500,
+        discount: 0,
+        taxAmount: 0,
+        finalAmount: 27500,
+        paidAmount: 27500,
+        paymentStatus: 'Paid',
+        paymentMethod: 'UPI'
+      }
+    ];
+
     setSalesEntries((prev) => {
-      const merged = [...sampleStores, ...prev];
+      const merged = [...sampleStores, ...historicalTrends, ...prev];
       localStorage.setItem('snack_sales_entries', JSON.stringify(merged));
       return merged;
     });
 
-    addAuditLog('LOAD_SAMPLE_ROUTE', 'SALES', 'Loaded sample salesperson store route circuit for GPS visualization');
+    addAuditLog('LOAD_SAMPLE_ROUTE', 'SALES', 'Loaded multi-period sales and GPS route data for CEO review');
   };
 
   const handleDeleteSale = (id: string) => {
@@ -1752,6 +2123,21 @@ export default function App() {
         
         {/* User Profile / CEO Options Bar */}
         <div className="hidden md:flex items-center gap-3">
+          {/* Firebase Google Auth & Cloud Firestore Sync */}
+          <FirebaseAuthBar
+            user={firebaseSync.user}
+            loading={firebaseSync.loading}
+            syncStatus={firebaseSync.syncStatus}
+            lastSyncedAt={firebaseSync.lastSyncedAt}
+            onSignIn={firebaseSync.signInWithGoogle}
+            onSignOut={firebaseSync.signOut}
+            onManualSync={() => firebaseSync.saveUserDataToFirestore({
+              recipes,
+              sales: salesEntries,
+              expenses,
+              settings: companySettings
+            })}
+          />
           {(isCeo || currentUser.role === 'Admin') && (
             <button
               onClick={() => setActiveTab('master-settings')}
@@ -1830,6 +2216,11 @@ export default function App() {
             onAddMaterial={handleAddMaterial}
             onEditMaterial={handleEditMaterial}
             onDeleteMaterial={handleDeleteMaterial}
+            onClearMaterials={() => {
+              setMaterials([]);
+              localStorage.removeItem('snack_materials');
+              addAuditLog('CLEAR_MATERIALS', 'INVENTORY', 'Cleared all raw stock inventory materials');
+            }}
           />
         )}
 
@@ -1840,6 +2231,11 @@ export default function App() {
             onAddBill={handleAddBill}
             onDeleteBill={handleDeleteBill}
             onEditBill={handleEditBill}
+            onClearPurchases={() => {
+              setBills([]);
+              localStorage.removeItem('snack_bills');
+              addAuditLog('CLEAR_PURCHASES', 'PURCHASES', 'Cleared all purchase invoices');
+            }}
           />
         )}
 
@@ -1852,6 +2248,11 @@ export default function App() {
             onDeleteRecipe={handleDeleteRecipe}
             onUpdatePackagingSizes={handleUpdateRecipePackagingSizes}
             onClearAllRecipesToZero={handleClearAllRecipesToZero}
+            onClearRecipes={() => {
+              setRecipes([]);
+              localStorage.removeItem('snack_recipes');
+              addAuditLog('CLEAR_RECIPES', 'RECIPES', 'Cleared all recipe formulations');
+            }}
             canDelete={currentUser.role === 'CEO' || userPerms.canDelete}
           />
         )}
@@ -1864,6 +2265,11 @@ export default function App() {
             onAddEntry={handleAddDailyUsage}
             onUpdateEntry={handleUpdateDailyUsage}
             onDeleteEntry={handleDeleteDailyUsage}
+            onClearDailyUsage={() => {
+              setDailyUsageEntries([]);
+              localStorage.removeItem('snack_daily_usage');
+              addAuditLog('CLEAR_DAILY_USAGE', 'DAILY_USAGE', 'Cleared all daily production usage entries');
+            }}
             canEdit={currentUser.role === 'CEO' || userPerms.canEdit}
           />
         )}
@@ -1882,6 +2288,11 @@ export default function App() {
             onAddPayment={handleAddPaymentToInvoice}
             onUpdateSaleLocation={handleUpdateSaleLocation}
             onAddSampleRouteData={handleAddSampleRouteData}
+            onClearSales={() => {
+              setSalesEntries([]);
+              localStorage.removeItem('snack_sales_entries');
+              addAuditLog('CLEAR_SALES', 'SALES', 'Cleared all customer sales invoices');
+            }}
             initialTab="invoices"
           />
         )}
@@ -1897,6 +2308,10 @@ export default function App() {
             }}
             recipes={recipes}
             onAddSale={handleAddSale}
+            onClearRouteTracking={() => {
+              localStorage.removeItem('snack_sales_visits');
+              addAuditLog('CLEAR_ROUTE_TRACKING', 'TRACKING', 'Cleared field route tracking and visit remarks');
+            }}
           />
         )}
 
@@ -1919,6 +2334,11 @@ export default function App() {
               }
               setEmployeeSalaries((prev) => prev.filter((item) => item.id !== id));
               addAuditLog('DELETE_SALARY_RECORD', 'PAYROLL', `Deleted salary record #${id}`);
+            }}
+            onClearSalaries={() => {
+              setEmployeeSalaries([]);
+              localStorage.removeItem('snack_salaries');
+              addAuditLog('CLEAR_SALARIES', 'PAYROLL', 'Cleared all employee payroll and salary records');
             }}
             currentUserRole={currentUser.role}
             canEdit={userPerms.canEdit}

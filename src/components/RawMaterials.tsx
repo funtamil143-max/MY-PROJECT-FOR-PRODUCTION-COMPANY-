@@ -55,14 +55,16 @@ interface RawMaterialsProps {
   onAddMaterial: (material: Omit<RawMaterial, 'id' | 'lastUpdated'>) => void;
   onEditMaterial: (id: string, updates: Partial<RawMaterial>) => void;
   onDeleteMaterial: (id: string) => void;
+  onClearMaterials?: () => void;
 }
 
-export default function RawMaterials({ materials, onAddMaterial, onEditMaterial, onDeleteMaterial }: RawMaterialsProps) {
+export default function RawMaterials({ materials, onAddMaterial, onEditMaterial, onDeleteMaterial, onClearMaterials }: RawMaterialsProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
+  const [showClearModal, setShowClearModal] = useState<boolean>(false);
 
   // Form State for Adding
   const [name, setName] = useState('');
@@ -415,6 +417,17 @@ export default function RawMaterials({ materials, onAddMaterial, onEditMaterial,
             <FileSpreadsheet className="w-4 h-4" />
             <span>Export Excel</span>
           </button>
+          {onClearMaterials && materials.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowClearModal(true)}
+              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-sm font-semibold rounded-xl transition-all duration-150 flex items-center space-x-1.5 shadow-2xs cursor-pointer"
+              title="Clear all materials and reset inventory"
+            >
+              <Trash className="w-4 h-4 text-rose-600" />
+              <span>Clear Inventory</span>
+            </button>
+          )}
           <button
             id="add-material-btn"
             onClick={() => setIsAdding(!isAdding)}
@@ -425,6 +438,42 @@ export default function RawMaterials({ materials, onAddMaterial, onEditMaterial,
           </button>
         </div>
       </div>
+
+      {/* Clear Confirmation Modal */}
+      {showClearModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-extrabold text-slate-900">Clear Inventory Materials?</h3>
+              <p className="text-xs text-slate-500">
+                Are you sure you want to clear all {materials.length} raw materials and packaging pouches from your inventory?
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowClearModal(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowClearModal(false);
+                  onClearMaterials?.();
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer"
+              >
+                Confirm Clear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add New Material Form Panel */}
       {isAdding && (

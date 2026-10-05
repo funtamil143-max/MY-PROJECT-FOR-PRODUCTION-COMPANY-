@@ -3,7 +3,8 @@
   "description": "A comprehensive snack production, recipe cost analyzer, inventory tracker, and bulk ingredient ordering utility.",
   "requestFramePermissions": [
     "microphone",
-    "camera"
+    "camera",
+    "geolocation"
   ],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

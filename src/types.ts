@@ -413,6 +413,33 @@ export interface SalesVisitRecord {
   isNewShopProspect?: boolean;
   shopCategory?: 'Wholesaler' | 'Retail Shop' | 'Supermarket' | 'Bakery/Tea Stall' | 'Canteen';
   photoUrl?: string;
+  assignedDays?: DayOfWeek[];
+  assignedRouteDay?: DayOfWeek;
+}
+
+export type DayOfWeek = 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday';
+
+export interface StoreLocation {
+  id: string;
+  shopName: string;
+  ownerName?: string;
+  phone?: string;
+  address: string;
+  location: {
+    latitude: number;
+    longitude: number;
+    accuracyMeters?: number;
+    address?: string;
+  };
+  shopCategory?: 'Wholesaler' | 'Retail Shop' | 'Supermarket' | 'Bakery/Tea Stall' | 'Canteen' | 'Other';
+  assignedDays: DayOfWeek[]; // Days of week route is scheduled: Monday to Sunday
+  assignedDates?: string[]; // Specific calendar dates (YYYY-MM-DD)
+  assignedSalesperson?: string; // Assigned salesperson for this route
+  routeSequence?: number; // Sequence number along the route (1, 2, 3...)
+  notes?: string;
+  active?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 // Factory Expense & Overhead Spending Module

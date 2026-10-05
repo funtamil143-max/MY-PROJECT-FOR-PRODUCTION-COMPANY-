@@ -1,4 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import {
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend
+} from 'recharts';
 import { SaleEntry, SaleItem, Recipe, CompanyInvoiceSettings, UserRole } from '../types';
 import InvoiceModal from './InvoiceModal';
 import WhatsAppBillModal from './WhatsAppBillModal';
@@ -38,9 +48,54 @@ import {
   Download,
   MapPin,
   Navigation,
-  ExternalLink
+  ExternalLink,
+  BarChart3,
+  Activity
 } from 'lucide-react';
 import { exportToExcel } from '../utils/excelExport';
+
+// Custom Tooltip for CEO Revenue Trend Line Chart
+const RevenueChartTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0]?.payload;
+    if (!data) return null;
+    return (
+      <div className="bg-slate-900/95 backdrop-blur-md text-white p-3.5 rounded-xl border border-slate-700 shadow-xl text-xs space-y-2 min-w-[210px]">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+          <span className="font-bold text-slate-100">{data.displayLabel || label}</span>
+          <span className="text-[10px] text-slate-400 font-mono">
+            {data.count} {data.count === 1 ? 'sale' : 'sales'}
+          </span>
+        </div>
+        <div className="space-y-1.5">
+          {payload.map((entry: any, index: number) => (
+            <div key={`item-${index}`} className="flex items-center justify-between text-[11px]">
+              <span className="flex items-center gap-1.5">
+                <span
+                  className="w-2.5 h-2.5 rounded-sm inline-block"
+                  style={{ backgroundColor: entry.color || entry.stroke }}
+                />
+                <span className="text-slate-300">{entry.name}:</span>
+              </span>
+              <span className="font-bold font-mono text-slate-50">
+                ₹{Number(entry.value || 0).toLocaleString('en-IN')}
+              </span>
+            </div>
+          ))}
+        </div>
+        {data.revenue > 0 && (
+          <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px]">
+            <span className="text-slate-400">Cash Realized:</span>
+            <span className="font-bold text-emerald-400 font-mono">
+              {Math.round(((data.paid || 0) / data.revenue) * 100)}%
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  }
+  return null;
+};
 
 interface SalesProps {
   salesEntries: SaleEntry[];
@@ -55,6 +110,7 @@ interface SalesProps {
   onAddPayment?: (saleId: string, amount: number, method: string, notes: string) => void;
   onUpdateSaleLocation?: (saleId: string, location: SaleEntry['location']) => void;
   onAddSampleRouteData?: () => void;
+  onClearSales?: () => void;
   initialTab?: 'invoices' | 'route-map';
 }
 
@@ -71,14 +127,23 @@ export default function Sales({
   onAddPayment,
   onUpdateSaleLocation,
   onAddSampleRouteData,
+  onClearSales,
   initialTab = 'invoices',
 }: SalesProps) {
   const [salesSubTab, setSalesSubTab] = useState<'invoices' | 'route-map'>(initialTab);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showClearModal, setShowClearModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<SaleEntry | null>(null);
   const [whatsAppSale, setWhatsAppSale] = useState<SaleEntry | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Paid' | 'Pending' | 'Partial' | 'Cancelled'>('All');
+
+  // CEO Executive Revenue Trend Chart State
+  const [chartPeriod, setChartPeriod] = useState<'daily' | 'monthly'>('daily');
+  const [dailyDaysRange, setDailyDaysRange] = useState<'7' | '14' | '30' | 'all'>('30');
+  const [showRevenueLine, setShowRevenueLine] = useState<boolean>(true);
+  const [showPaidLine, setShowPaidLine] = useState<boolean>(true);
+  const [showPendingLine, setShowPendingLine] = useState<boolean>(true);
 
   // New Sale Form State
   const [invoiceNumber, setInvoiceNumber] = useState('');
@@ -529,6 +594,140 @@ export default function Sales({
     .filter((s) => s.paymentStatus === 'Pending')
     .reduce((sum, s) => sum + s.finalAmount, 0);
 
+  // CEO Executive Revenue Trend Calculations
+  const dailyTrendData = useMemo(() => {
+    const dayMap = new Map<string, { date: string; displayLabel: string; revenue: number; paid: number; pending: number; count: number }>();
+    const activeSales = salesEntries.filter((s) => !s.isCancelled);
+
+    activeSales.forEach((s) => {
+      const dateKey = s.date || 'Unknown';
+      let displayLabel = dateKey;
+      try {
+        if (dateKey.length >= 10) {
+          const parts = dateKey.split('-');
+          if (parts.length === 3) {
+            const dateObj = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+            displayLabel = dateObj.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+          }
+        }
+      } catch (e) {
+        displayLabel = dateKey;
+      }
+
+      const current = dayMap.get(dateKey) || {
+        date: dateKey,
+        displayLabel,
+        revenue: 0,
+        paid: 0,
+        pending: 0,
+        count: 0,
+      };
+
+      const rev = Number(s.finalAmount) || 0;
+      const paid = s.paidAmount !== undefined ? Number(s.paidAmount) : (s.paymentStatus === 'Paid' ? rev : 0);
+      const pending = Math.max(0, rev - paid);
+
+      current.revenue += rev;
+      current.paid += paid;
+      current.pending += pending;
+      current.count += 1;
+      dayMap.set(dateKey, current);
+    });
+
+    return Array.from(dayMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+  }, [salesEntries]);
+
+  const monthlyTrendData = useMemo(() => {
+    const monthMap = new Map<string, { monthKey: string; displayLabel: string; revenue: number; paid: number; pending: number; count: number }>();
+    const activeSales = salesEntries.filter((s) => !s.isCancelled);
+
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    activeSales.forEach((s) => {
+      const dateKey = s.date || '2026-10-01';
+      const monthKey = dateKey.substring(0, 7);
+      const parts = monthKey.split('-');
+      let displayLabel = monthKey;
+      if (parts.length === 2) {
+        const year = parts[0];
+        const monthNum = parseInt(parts[1], 10);
+        displayLabel = `${monthNames[monthNum - 1] || parts[1]} '${year.slice(2)}`;
+      }
+
+      const current = monthMap.get(monthKey) || {
+        monthKey,
+        displayLabel,
+        revenue: 0,
+        paid: 0,
+        pending: 0,
+        count: 0,
+      };
+
+      const rev = Number(s.finalAmount) || 0;
+      const paid = s.paidAmount !== undefined ? Number(s.paidAmount) : (s.paymentStatus === 'Paid' ? rev : 0);
+      const pending = Math.max(0, rev - paid);
+
+      current.revenue += rev;
+      current.paid += paid;
+      current.pending += pending;
+      current.count += 1;
+      monthMap.set(monthKey, current);
+    });
+
+    return Array.from(monthMap.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+  }, [salesEntries]);
+
+  const activeChartData = useMemo(() => {
+    if (chartPeriod === 'monthly') {
+      return monthlyTrendData;
+    }
+    if (dailyDaysRange === 'all') {
+      return dailyTrendData;
+    }
+    const daysCount = parseInt(dailyDaysRange, 10);
+    return dailyTrendData.slice(-daysCount);
+  }, [chartPeriod, dailyDaysRange, dailyTrendData, monthlyTrendData]);
+
+  const trendStats = useMemo(() => {
+    if (activeChartData.length === 0) {
+      return {
+        peakRevenue: 0,
+        peakLabel: 'N/A',
+        averageRevenue: 0,
+        collectionRate: 0,
+        totalInvoices: 0,
+        totalRevenue: 0,
+        totalPaid: 0,
+        totalPending: 0,
+      };
+    }
+
+    let peak = activeChartData[0];
+    let totalRev = 0;
+    let totalPaid = 0;
+    let totalInv = 0;
+
+    activeChartData.forEach((d) => {
+      if (d.revenue > peak.revenue) {
+        peak = d;
+      }
+      totalRev += d.revenue;
+      totalPaid += d.paid;
+      totalInv += d.count;
+    });
+
+    return {
+      peakRevenue: peak.revenue,
+      peakLabel: peak.displayLabel,
+      averageRevenue: Math.round(totalRev / (activeChartData.length || 1)),
+      collectionRate: totalRev > 0 ? (totalPaid / totalRev) * 100 : 0,
+      totalInvoices: totalInv,
+      totalRevenue: totalRev,
+      totalPaid: totalPaid,
+      totalPending: Math.max(0, totalRev - totalPaid),
+    };
+  }, [activeChartData]);
+
   // Filtered sales history
   const filteredSales = salesEntries.filter((s) => {
     const matchesSearch =
@@ -711,6 +910,18 @@ export default function Sales({
             <span>Print Report</span>
           </button>
 
+          {onClearSales && salesEntries.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowClearModal(true)}
+              className="px-4 py-2.5 bg-rose-600/30 hover:bg-rose-600 text-rose-200 hover:text-white border border-rose-500/40 font-bold rounded-xl text-xs transition-all flex items-center space-x-1.5 shadow-sm cursor-pointer"
+              title="Clear all recorded sales invoices"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Clear Sales</span>
+            </button>
+          )}
+
           <button
             id="create-sale-invoice-btn"
             onClick={handleOpenModal}
@@ -721,6 +932,42 @@ export default function Sales({
           </button>
         </div>
       </div>
+
+      {/* Clear Confirmation Modal */}
+      {showClearModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-extrabold text-slate-900">Clear All Sales Invoices?</h3>
+              <p className="text-xs text-slate-500">
+                Are you sure you want to clear all {salesEntries.length} billed sales invoices and transactions?
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowClearModal(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowClearModal(false);
+                  onClearSales?.();
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer"
+              >
+                Confirm Clear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Conditional Subtab View */}
       {salesSubTab === 'route-map' ? (
@@ -792,6 +1039,321 @@ export default function Sales({
             <p className="text-[11px] text-slate-500 mt-0.5">Per bill average</p>
           </div>
         </div>
+      </div>
+
+      {/* CEO Executive Revenue Trends Line Chart (Recharts) */}
+      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-5 md:p-6 space-y-5" id="ceo-revenue-trend-analytics">
+        {/* Header & Controls */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-xs font-semibold text-indigo-700 tracking-wider uppercase">
+              <Activity className="w-4 h-4 text-indigo-600" />
+              <span>CEO Strategic Review · Executive Analytics</span>
+              <span className="text-slate-300 font-normal">|</span>
+              <span className="text-slate-500 font-medium normal-case">
+                {currentUserRole === 'CEO' ? 'Active CEO Dashboard' : 'Executive Overview'}
+              </span>
+            </div>
+            <h2 className="text-xl md:text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
+              <span>Revenue & Collection Trends</span>
+            </h2>
+            <p className="text-xs md:text-sm text-slate-500 max-w-2xl">
+              Real-time daily and monthly revenue trajectory, cash vs. credit recovery rates, and peak sales velocity.
+            </p>
+          </div>
+
+          {/* Timeframe & Chart Controls */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Daily vs Monthly Segmented Toggle */}
+            <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setChartPeriod('daily')}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                  chartPeriod === 'daily'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="View Daily Sales Fluctuations"
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                <span>Daily Trend</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartPeriod('monthly')}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                  chartPeriod === 'monthly'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="View Month-over-Month Revenue Growth"
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                <span>Monthly Trend</span>
+              </button>
+            </div>
+
+            {/* Daily Range Filter (Only shown when Daily is active) */}
+            {chartPeriod === 'daily' && (
+              <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-medium">
+                {(['7', '14', '30', 'all'] as const).map((range) => (
+                  <button
+                    key={range}
+                    type="button"
+                    onClick={() => setDailyDaysRange(range)}
+                    className={`px-2.5 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      dailyDaysRange === range
+                        ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {range === 'all' ? 'All Days' : `${range}D`}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Executive Metric Cards (Synchronized with chart period) */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+          {/* Period Total Revenue */}
+          <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80">
+            <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block">
+              {chartPeriod === 'monthly' ? 'Total Period Billed' : 'Selected Billed Total'}
+            </span>
+            <div className="text-lg md:text-xl font-extrabold text-slate-900 font-mono mt-1">
+              ₹{(trendStats.totalRevenue || 0).toLocaleString('en-IN')}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5">
+              {trendStats.totalInvoices} invoice{trendStats.totalInvoices !== 1 ? 's' : ''} in view
+            </div>
+          </div>
+
+          {/* Peak Revenue */}
+          <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80">
+            <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block">
+              {chartPeriod === 'monthly' ? 'Peak Month Sales' : 'Peak Single Day'}
+            </span>
+            <div className="text-lg md:text-xl font-extrabold text-indigo-700 font-mono mt-1">
+              ₹{(trendStats.peakRevenue || 0).toLocaleString('en-IN')}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+              {trendStats.peakLabel !== 'N/A' ? `Achieved on ${trendStats.peakLabel}` : 'No sales recorded'}
+            </div>
+          </div>
+
+          {/* Average Revenue per Period */}
+          <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80">
+            <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block">
+              {chartPeriod === 'monthly' ? 'Avg Monthly Revenue' : 'Avg Daily Revenue'}
+            </span>
+            <div className="text-lg md:text-xl font-extrabold text-slate-900 font-mono mt-1">
+              ₹{(trendStats.averageRevenue || 0).toLocaleString('en-IN')}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5">
+              {chartPeriod === 'monthly' ? 'Per recorded month' : 'Per active sales day'}
+            </div>
+          </div>
+
+          {/* Cash Realization Rate */}
+          <div className="p-3.5 bg-slate-50/80 rounded-xl border border-slate-200/80">
+            <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block">
+              Cash Realization Rate
+            </span>
+            <div className="text-lg md:text-xl font-extrabold text-emerald-700 font-mono mt-1 flex items-center gap-1.5">
+              <span>{(trendStats.collectionRate || 0).toFixed(1)}%</span>
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5 truncate">
+              ₹{(trendStats.totalPaid || 0).toLocaleString('en-IN')} paid · ₹{(trendStats.totalPending || 0).toLocaleString('en-IN')} pending
+            </div>
+          </div>
+        </div>
+
+        {/* Series Filter & Legend Toggles */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Metrics:</span>
+
+            {/* Total Revenue toggle */}
+            <button
+              type="button"
+              onClick={() => setShowRevenueLine(!showRevenueLine)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                showRevenueLine
+                  ? 'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-2xs'
+                  : 'bg-white border-slate-200 text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <span className={`w-2.5 h-2.5 rounded-sm ${showRevenueLine ? 'bg-indigo-600' : 'bg-slate-300'}`} />
+              <span>Billed Revenue (₹)</span>
+            </button>
+
+            {/* Collected Paid toggle */}
+            <button
+              type="button"
+              onClick={() => setShowPaidLine(!showPaidLine)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                showPaidLine
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 shadow-2xs'
+                  : 'bg-white border-slate-200 text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <span className={`w-2.5 h-2.5 rounded-sm ${showPaidLine ? 'bg-emerald-600' : 'bg-slate-300'}`} />
+              <span>Collected Paid (₹)</span>
+            </button>
+
+            {/* Pending Credit toggle */}
+            <button
+              type="button"
+              onClick={() => setShowPendingLine(!showPendingLine)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                showPendingLine
+                  ? 'bg-amber-50 border-amber-200 text-amber-700 shadow-2xs'
+                  : 'bg-white border-slate-200 text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <span className={`w-2.5 h-2.5 rounded-sm ${showPendingLine ? 'bg-amber-500' : 'bg-slate-300'}`} />
+              <span>Pending Credit (₹)</span>
+            </button>
+          </div>
+
+          <div className="text-xs text-slate-400 font-medium">
+            <span>Hover points for detailed bill breakdown</span>
+          </div>
+        </div>
+
+        {/* The Recharts Line Chart / Empty State Container */}
+        <div className="w-full pt-2">
+          {activeChartData.length === 0 ? (
+            <div className="h-72 rounded-xl bg-slate-50 border border-dashed border-slate-200 flex flex-col items-center justify-center p-6 text-center space-y-3">
+              <TrendingUp className="w-10 h-10 text-slate-300 stroke-1" />
+              <div className="space-y-1">
+                <p className="text-sm font-bold text-slate-700">No Sales Records Available for this Period</p>
+                <p className="text-xs text-slate-400 max-w-sm">
+                  Log customer sales or load multi-period sample route data to visualize daily and monthly trends.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                {onAddSampleRouteData && (
+                  <button
+                    type="button"
+                    onClick={onAddSampleRouteData}
+                    className="px-3.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs rounded-lg border border-indigo-200 transition-all cursor-pointer flex items-center gap-1.5"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Load Multi-Day Sample Sales</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleOpenModal}
+                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Create Invoice</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="h-80 w-full" id="recharts-sales-container">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart
+                  data={activeChartData}
+                  margin={{ top: 12, right: 24, left: 0, bottom: 6 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <XAxis
+                    dataKey="displayLabel"
+                    stroke="#94a3b8"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={{ stroke: '#e2e8f0' }}
+                    dy={6}
+                  />
+                  <YAxis
+                    stroke="#94a3b8"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(val: number) => (val >= 1000 ? `₹${(val / 1000).toFixed(0)}k` : `₹${val}`)}
+                    dx={-4}
+                  />
+                  <Tooltip content={<RevenueChartTooltip />} />
+                  {showRevenueLine && (
+                    <Line
+                      type="monotone"
+                      dataKey="revenue"
+                      name="Billed Revenue"
+                      stroke="#4f46e5"
+                      strokeWidth={2.75}
+                      dot={{ r: 4, stroke: '#4f46e5', strokeWidth: 2, fill: '#ffffff' }}
+                      activeDot={{ r: 6, fill: '#4f46e5', stroke: '#ffffff', strokeWidth: 2 }}
+                    />
+                  )}
+                  {showPaidLine && (
+                    <Line
+                      type="monotone"
+                      dataKey="paid"
+                      name="Collected Paid"
+                      stroke="#059669"
+                      strokeWidth={2.5}
+                      dot={{ r: 3.5, stroke: '#059669', strokeWidth: 2, fill: '#ffffff' }}
+                      activeDot={{ r: 6, fill: '#059669', stroke: '#ffffff', strokeWidth: 2 }}
+                    />
+                  )}
+                  {showPendingLine && (
+                    <Line
+                      type="monotone"
+                      dataKey="pending"
+                      name="Pending Credit"
+                      stroke="#d97706"
+                      strokeWidth={2}
+                      strokeDasharray="4 4"
+                      dot={{ r: 3, stroke: '#d97706', strokeWidth: 1.5, fill: '#ffffff' }}
+                      activeDot={{ r: 5, fill: '#d97706', stroke: '#ffffff', strokeWidth: 2 }}
+                    />
+                  )}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
+
+        {/* CEO Strategic Takeaways Banner */}
+        {activeChartData.length > 0 && (
+          <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 text-slate-600">
+              <span className="font-bold text-slate-800 flex items-center gap-1">
+                <Check className="w-3.5 h-3.5 text-emerald-600" />
+                CEO Takeaway:
+              </span>
+              <span>
+                {trendStats.peakRevenue > 0
+                  ? `Peak sales velocity recorded on ${trendStats.peakLabel} with ₹${trendStats.peakRevenue.toLocaleString('en-IN')}. `
+                  : ''}
+                {trendStats.collectionRate >= 80
+                  ? `Cash recovery is strong at ${trendStats.collectionRate.toFixed(0)}%.`
+                  : `Receivables attention required: ₹${(trendStats.totalPending || 0).toLocaleString('en-IN')} pending collection.`}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-auto">
+              {onAddSampleRouteData && (
+                <button
+                  type="button"
+                  onClick={onAddSampleRouteData}
+                  className="text-slate-500 hover:text-indigo-600 font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                  title="Add more test sales data across dates"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Refresh / Add Demo Trends</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Search & Filter Controls */}

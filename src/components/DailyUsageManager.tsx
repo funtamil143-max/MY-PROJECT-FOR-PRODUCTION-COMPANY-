@@ -41,6 +41,7 @@ interface DailyUsageManagerProps {
   onAddEntry: (entry: Omit<DailyUsageEntry, 'id'>, shouldDeductStock?: boolean) => void;
   onUpdateEntry: (id: string, entry: Omit<DailyUsageEntry, 'id'>) => void;
   onDeleteEntry: (id: string) => void;
+  onClearDailyUsage?: () => void;
   canEdit?: boolean;
 }
 
@@ -51,8 +52,10 @@ export default function DailyUsageManager({
   onAddEntry,
   onUpdateEntry,
   onDeleteEntry,
+  onClearDailyUsage,
   canEdit = true
 }: DailyUsageManagerProps) {
+  const [showClearModal, setShowClearModal] = useState<boolean>(false);
   // Filters State
   const [selectedMonth, setSelectedMonth] = useState<string>('2026-09'); // e.g. '2026-09' or 'all'
   const [selectedWeek, setSelectedWeek] = useState<string>('all'); // 'all' | '1' | '2' | '3' | '4' | '5'
@@ -695,6 +698,18 @@ export default function DailyUsageManager({
             <span>+ Log Daily Usage & Costs</span>
           </button>
 
+          {onClearDailyUsage && entries.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowClearModal(true)}
+              className="px-3.5 py-2 bg-rose-500/20 hover:bg-rose-600 text-rose-200 hover:text-white border border-rose-500/40 font-bold text-xs rounded-xl shadow-xs flex items-center space-x-1.5 transition-all cursor-pointer"
+              title="Clear all recorded daily usage entries"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Clear Usage Entries</span>
+            </button>
+          )}
+
           <button
             onClick={handleExportExcel}
             className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center space-x-1.5 transition-all cursor-pointer"
@@ -705,6 +720,42 @@ export default function DailyUsageManager({
           </button>
         </div>
       </div>
+
+      {/* Clear Confirmation Modal */}
+      {showClearModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-extrabold text-slate-900">Clear Daily Usage Entries?</h3>
+              <p className="text-xs text-slate-500">
+                Are you sure you want to clear all {entries.length} recorded daily production usage logs?
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowClearModal(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowClearModal(false);
+                  onClearDailyUsage?.();
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer"
+              >
+                Confirm Clear
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 2. FILTER TOOLBAR: MONTH DATA & WEEK SPENDINGS FILTER */}
       <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-xs space-y-3.5">

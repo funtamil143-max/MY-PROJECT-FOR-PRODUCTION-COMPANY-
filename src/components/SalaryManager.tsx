@@ -69,6 +69,7 @@ interface SalaryManagerProps {
   canEdit: boolean;
   customRoles?: string[];
   onAddCustomRole?: (newRole: string) => void;
+  onClearSalaries?: () => void;
 }
 
 export default function SalaryManager({
@@ -81,7 +82,9 @@ export default function SalaryManager({
   canEdit,
   customRoles = [],
   onAddCustomRole,
+  onClearSalaries,
 }: SalaryManagerProps) {
+  const [showClearModal, setShowClearModal] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'staff_directory' | 'payroll_vouchers'>('staff_directory');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPayoutFilter, setSelectedPayoutFilter] = useState<string>('All');
@@ -632,6 +635,18 @@ export default function SalaryManager({
             </button>
           )}
 
+          {onClearSalaries && salaryEntries.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowClearModal(true)}
+              className="px-3.5 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Clear all staff salary and payroll records"
+            >
+              <Trash2 className="w-4 h-4 text-rose-600" />
+              <span>Clear Salaries</span>
+            </button>
+          )}
+
           {canEdit && !isAdding && (
             <button
               onClick={() => {
@@ -646,6 +661,44 @@ export default function SalaryManager({
           )}
         </div>
       </div>
+
+      {/* Clear Salaries Confirmation Modal */}
+      {showClearModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex justify-center items-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-6 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div className="text-center space-y-1">
+              <h3 className="text-base font-extrabold text-slate-900">Clear All Salary & Payroll Data?</h3>
+              <p className="text-xs text-slate-500">
+                Are you sure you want to clear all {salaryEntries.length} salary and payroll disbursement records?
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowClearModal(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onClearSalaries) {
+                    onClearSalaries();
+                  }
+                  setShowClearModal(false);
+                }}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer"
+              >
+                Yes, Clear All Salaries
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Navigation Portion Switcher (Tabs) */}
       <div className="flex border-b border-slate-200 bg-white rounded-2xl p-1.5 shadow-xs border">

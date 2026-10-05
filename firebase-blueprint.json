@@ -1,0 +1,153 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User account profile and authorization role",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email", "description": "User email address" },
+        "displayName": { "type": "string", "description": "Full name or username" },
+        "photoURL": { "type": "string", "description": "Profile photo URL" },
+        "role": { "type": "string", "enum": ["owner_ceo", "production_manager", "sales_executive", "admin", "viewer"], "description": "User role permissions" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Recipe": {
+      "title": "Recipe",
+      "description": "Snack recipe composition, cost calculation, and batch sizing",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique recipe identifier" },
+        "userId": { "type": "string", "description": "Owner UID" },
+        "name": { "type": "string", "description": "Snack recipe name (e.g. Madurai Special Mixture)" },
+        "category": { "type": "string", "description": "Snack category" },
+        "sellingPricePerKg": { "type": "number", "description": "Target selling price per kg" },
+        "batchYieldKg": { "type": "number", "description": "Batch output in kilograms" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["id", "userId", "name"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "Sale invoice entry with line items, GPS location, and payment status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique sale invoice ID" },
+        "userId": { "type": "string", "description": "Owner UID" },
+        "invoiceNumber": { "type": "string", "description": "Invoice reference number" },
+        "customerName": { "type": "string", "description": "Store or buyer name" },
+        "customerPhone": { "type": "string", "description": "Contact number" },
+        "customerAddress": { "type": "string", "description": "Delivery address" },
+        "totalAmount": { "type": "number", "description": "Gross invoice total in INR" },
+        "finalAmount": { "type": "number", "description": "Net invoice total after discount" },
+        "paymentStatus": { "type": "string", "enum": ["Paid", "Pending", "Partial"], "description": "Payment status" },
+        "paymentMethod": { "type": "string", "description": "Payment mode (Cash, UPI, Credit, Bank)" },
+        "date": { "type": "string", "description": "Sale date YYYY-MM-DD" },
+        "salesPerson": { "type": "string", "description": "Sales executive name" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["id", "userId", "customerName", "date"]
+    },
+    "Store": {
+      "title": "Store",
+      "description": "Retail / wholesale store location with GPS coordinates and assigned route days",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique store identifier" },
+        "userId": { "type": "string", "description": "Owner UID" },
+        "shopName": { "type": "string", "description": "Store shop name" },
+        "ownerName": { "type": "string", "description": "Proprietor / manager name" },
+        "phone": { "type": "string", "description": "Phone number" },
+        "address": { "type": "string", "description": "Physical location address" },
+        "shopCategory": { "type": "string", "description": "Category: Retail, Wholesaler, Supermarket, Bakery, etc." },
+        "assignedSalesperson": { "type": "string", "description": "Assigned salesperson" },
+        "routeSequence": { "type": "number", "description": "Beat stop order sequence" },
+        "active": { "type": "boolean", "description": "Whether store is active on delivery routes" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["id", "userId", "shopName", "address"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Factory operational spending and overhead record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique expense record ID" },
+        "userId": { "type": "string", "description": "Owner UID" },
+        "voucherNumber": { "type": "string", "description": "Voucher reference" },
+        "category": { "type": "string", "description": "Expense category" },
+        "amount": { "type": "number", "description": "Amount in INR" },
+        "date": { "type": "string", "description": "Date YYYY-MM-DD" },
+        "paidTo": { "type": "string", "description": "Vendor / recipient" },
+        "paymentMode": { "type": "string", "description": "Payment mode" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["id", "userId", "category", "amount", "date"]
+    },
+    "GeneratedVideo": {
+      "title": "GeneratedVideo",
+      "description": "Product showcase video generated using Veo model veo-3.1-fast-generate-preview",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique video entry ID" },
+        "userId": { "type": "string", "description": "Owner UID" },
+        "title": { "type": "string", "description": "Video title / snack product" },
+        "prompt": { "type": "string", "description": "Generation prompt" },
+        "aspectRatio": { "type": "string", "enum": ["16:9", "9:16"], "description": "Video aspect ratio" },
+        "sourceImageUrl": { "type": "string", "description": "Source image preview or data URL" },
+        "videoUrl": { "type": "string", "description": "Video playback URL or proxy endpoint" },
+        "operationName": { "type": "string", "description": "Veo operation name" },
+        "status": { "type": "string", "enum": ["generating", "completed", "failed"], "description": "Generation state" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["id", "userId", "aspectRatio", "status"]
+    },
+    "VoiceNote": {
+      "title": "VoiceNote",
+      "description": "Audio transcription note generated using gemini-3.5-transcribe",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique audio note ID" },
+        "userId": { "type": "string", "description": "Owner UID" },
+        "transcription": { "type": "string", "description": "Transcribed text from speech" },
+        "audioDurationSeconds": { "type": "number", "description": "Duration in seconds" },
+        "contextTag": { "type": "string", "description": "Context (e.g. Sales Beat, Expense, Recipe Idea)" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["id", "userId", "transcription"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profile and authorization permissions"
+    },
+    "/users/{userId}/recipes/{recipeId}": {
+      "schema": { "$ref": "#/entities/Recipe" },
+      "description": "User custom recipes and bill of materials"
+    },
+    "/users/{userId}/sales/{saleId}": {
+      "schema": { "$ref": "#/entities/Sale" },
+      "description": "User billed sales entries and invoices"
+    },
+    "/users/{userId}/stores/{storeId}": {
+      "schema": { "$ref": "#/entities/Store" },
+      "description": "User delivery route store locations and schedules"
+    },
+    "/users/{userId}/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/Expense" },
+      "description": "User factory expense vouchers"
+    },
+    "/users/{userId}/videos/{videoId}": {
+      "schema": { "$ref": "#/entities/GeneratedVideo" },
+      "description": "User Veo animated promotional videos"
+    },
+    "/users/{userId}/voiceNotes/{noteId}": {
+      "schema": { "$ref": "#/entities/VoiceNote" },
+      "description": "User voice transcriptions from microphone"
+    }
+  }
+}

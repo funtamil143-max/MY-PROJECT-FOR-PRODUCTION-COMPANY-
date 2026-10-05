@@ -1,39 +1,28 @@
 /**
- * Robot-Grade High-Precision GPS Engine
+ * High-Accuracy Device GPS Capture Engine
  * 
- * Provides ultra-accurate coordinate capture by:
- * 1. Enforcing high-accuracy hardware GNSS/GPS queries (enableHighAccuracy: true).
- * 2. Rapid acquisition: immediately calling getCurrentPosition for instant lock,
- *    plus watchPosition for multi-sample settling.
- * 3. Outlier rejection: filtering out GPS multipath reflections and satellite drift.
- * 4. Weighted centroid calculation: weighing coordinates inversely to their reported error radius.
- * 5. High precision formatting (6 decimal places = ~0.11m physical resolution).
+ * Enforces accurate coordinate lock under 50 meters:
+ * 1. Enforces enableHighAccuracy: true with maximumAge: 0 to query hardware GNSS/GPS satellites.
+ * 2. Continuously refines readings via watchPosition + getCurrentPosition until accuracy <= 50m is acquired.
+ * 3. Provides real-time accuracy progress (e.g. ±12m, ±28m, target < 50m).
+ * 4. Returns 6-decimal precision coordinates with isUnder50m verification flag.
  */
 
-export interface RobotGpsConfig {
-  enabled: boolean;
-  minAccuracyMeters: number; // e.g. 10m - target threshold
-  sampleCount: number;       // e.g. 1-3 fixes to average
-  timeoutMs: number;         // Max time to wait for desired accuracy
-  outlierFilter: boolean;    // Discard samples deviating significantly from median
-  snapToRoads?: boolean;
-  captureTheta?: boolean;    // Capture theta azimuth / orientation angle (0-360°)
+export interface DeviceGpsResult {
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number;
+  altitude?: number | null;
+  speed?: number | null;
+  heading?: number | null;
+  timestamp: number;
+  isUnder50m: boolean;
 }
-
-export const DEFAULT_ROBOT_GPS_CONFIG: RobotGpsConfig = {
-  enabled: true,
-  minAccuracyMeters: 10,
-  sampleCount: 2,
-  timeoutMs: 10000,
-  outlierFilter: true,
-  snapToRoads: true,
-  captureTheta: true,
-};
 
 export interface GpsReading {
   latitude: number;
   longitude: number;
-  accuracy: number; // in meters
+  accuracy: number;
   altitude?: number | null;
   speed?: number | null;
   heading?: number | null;
@@ -45,15 +34,35 @@ export interface RobotGpsResult {
   longitude: number;
   accuracyMeters: number;
   sampleCount: number;
-  fixQuality: 'ROBOT_RTK_GRADE' | 'EXCELLENT' | 'GOOD' | 'FAIR' | 'POOR';
+  fixQuality: 'EXCELLENT' | 'GOOD' | 'FAIR' | 'POOR';
   hdopEstimate: number;
   satellitesEstimated: number;
-  thetaDegrees?: number; // Heading azimuth orientation angle θ (0° - 360°)
-  thetaCompass?: string;  // Compass cardinal representation e.g. '045° NE'
-  thetaRadians?: number;  // θ in radians (-π to +π or 0 to 2π)
+  thetaDegrees?: number;
+  thetaCompass?: string;
+  thetaRadians?: number;
   readings: GpsReading[];
   timestamp: number;
 }
+
+export interface RobotGpsConfig {
+  enabled: boolean;
+  minAccuracyMeters: number;
+  sampleCount: number;
+  timeoutMs: number;
+  outlierFilter: boolean;
+  snapToRoads?: boolean;
+  captureTheta?: boolean;
+}
+
+export const DEFAULT_ROBOT_GPS_CONFIG: RobotGpsConfig = {
+  enabled: true,
+  minAccuracyMeters: 50,
+  sampleCount: 1,
+  timeoutMs: 5000,
+  outlierFilter: false,
+  snapToRoads: true,
+  captureTheta: false,
+};
 
 export function getCompassDirection(degrees: number): string {
   const norm = ((degrees % 360) + 360) % 360;
@@ -63,36 +72,38 @@ export function getCompassDirection(degrees: number): string {
 }
 
 /**
- * Capture high-precision GPS coordinates using instant lock + multi-sample centroid averaging.
- * Provides onProgress callback for real-time UI animation/status.
+ * Capture high-accuracy GPS coordinates under 50m with enableHighAccuracy: true, maximumAge: 0, timeout: 5000.
  */
-export async function captureRobotPrecisionGps(
-  config: Partial<RobotGpsConfig> = {},
-  onProgress?: (status: {
-    samplesCollected: number;
-    targetSamples: number;
+export async function captureDeviceGps(options?: {
+  timeoutMs?: number;
+  maxTargetAccuracyMeters?: number; // target <= 50m
+  onProgress?: (info: {
     currentAccuracy: number;
     bestAccuracy: number;
-    isLocked: boolean;
-    stageText: string;
-    thetaDegrees?: number;
-  }) => void
-): Promise<RobotGpsResult> {
-  const mergedConfig: RobotGpsConfig = { ...DEFAULT_ROBOT_GPS_CONFIG, ...config };
-
+    statusText: string;
+    isUnder50m: boolean;
+  }) => void;
+}): Promise<DeviceGpsResult> {
   if (typeof window === 'undefined' || !navigator.geolocation) {
     throw new Error('Geolocation is not supported by your browser or environment.');
   }
 
-  const targetSamples = Math.max(1, mergedConfig.sampleCount);
-  const collectedReadings: GpsReading[] = [];
+  const targetAccuracy = options?.maxTargetAccuracyMeters ?? 50; // Enforce under 50m target!
+  const timeoutMs = options?.timeoutMs || 5000;
 
-  return new Promise<RobotGpsResult>((resolve, reject) => {
+  options?.onProgress?.({
+    currentAccuracy: 0,
+    bestAccuracy: 0,
+    statusText: 'Connecting to GPS hardware satellites (Target: <50m)...',
+    isUnder50m: false,
+  });
+
+  return new Promise<DeviceGpsResult>((resolve, reject) => {
     let watchId: number | null = null;
     let timeoutTimer: any = null;
     let settlingTimer: any = null;
-    let bestReading: GpsReading | null = null;
-    let isResolved = false;
+    let bestPos: GeolocationPosition | null = null;
+    let isFinished = false;
 
     const cleanup = () => {
       if (watchId !== null) {
@@ -109,227 +120,194 @@ export async function captureRobotPrecisionGps(
       }
     };
 
-    const processResultsAndResolve = () => {
-      if (isResolved) return;
-      isResolved = true;
+    const finishWithPosition = (pos: GeolocationPosition) => {
+      if (isFinished) return;
+      isFinished = true;
       cleanup();
 
-      if (collectedReadings.length === 0) {
-        if (bestReading) {
-          collectedReadings.push(bestReading);
-        } else {
-          return reject(new Error('No valid GPS fixes received. Please check device location permissions and ensure GPS is enabled.'));
-        }
-      }
-
-      // Filter readings
-      let validReadings = collectedReadings;
-      if (mergedConfig.outlierFilter && validReadings.length >= 3) {
-        const sortedLats = [...validReadings].map(r => r.latitude).sort((a, b) => a - b);
-        const sortedLngs = [...validReadings].map(r => r.longitude).sort((a, b) => a - b);
-        const midIdx = Math.floor(sortedLats.length / 2);
-        const medianLat = sortedLats[midIdx];
-        const medianLng = sortedLngs[midIdx];
-
-        // Discard readings that are extreme outliers (> 0.001 deg ~ 110 meters from median)
-        validReadings = validReadings.filter(r => {
-          const latDiff = Math.abs(r.latitude - medianLat);
-          const lngDiff = Math.abs(r.longitude - medianLng);
-          return latDiff < 0.0015 && lngDiff < 0.0015;
-        });
-
-        if (validReadings.length === 0) {
-          validReadings = collectedReadings;
-        }
-      }
-
-      // Weighted average calculation: weights inversely proportional to accuracy squared
-      let totalWeight = 0;
-      let weightedLatSum = 0;
-      let weightedLngSum = 0;
-      let bestAccuracy = Infinity;
-
-      for (const r of validReadings) {
-        const safeAccuracy = Math.max(0.5, r.accuracy);
-        const weight = 1 / (safeAccuracy * safeAccuracy);
-        totalWeight += weight;
-        weightedLatSum += r.latitude * weight;
-        weightedLngSum += r.longitude * weight;
-        if (r.accuracy < bestAccuracy) {
-          bestAccuracy = r.accuracy;
-        }
-      }
-
-      const finalLat = Number((weightedLatSum / totalWeight).toFixed(6));
-      const finalLng = Number((weightedLngSum / totalWeight).toFixed(6));
-      const finalAccuracy = Number(bestAccuracy.toFixed(1));
-
-      // Quality rating
-      let fixQuality: RobotGpsResult['fixQuality'] = 'FAIR';
-      if (finalAccuracy <= 3) fixQuality = 'ROBOT_RTK_GRADE';
-      else if (finalAccuracy <= 8) fixQuality = 'EXCELLENT';
-      else if (finalAccuracy <= 15) fixQuality = 'GOOD';
-      else if (finalAccuracy <= 30) fixQuality = 'FAIR';
-      else fixQuality = 'POOR';
-
-      // HDOP estimate based on accuracy
-      const hdopEstimate = Number(Math.max(0.6, finalAccuracy / 4.5).toFixed(2));
-      const satellitesEstimated = Math.min(16, Math.max(6, Math.round(18 - hdopEstimate * 4)));
-
-      // Theta (Bearing / Heading Azimuth θ) Calculation
-      let thetaDegrees: number | undefined = undefined;
-      const headingReading = validReadings.find(r => r.heading !== null && r.heading !== undefined && !isNaN(r.heading));
-      if (headingReading && headingReading.heading !== null && headingReading.heading !== undefined) {
-        thetaDegrees = Number((((headingReading.heading % 360) + 360) % 360).toFixed(1));
-      } else if (validReadings.length >= 2) {
-        const first = validReadings[0];
-        const last = validReadings[validReadings.length - 1];
-        const dLon = ((last.longitude - first.longitude) * Math.PI) / 180;
-        const lat1 = (first.latitude * Math.PI) / 180;
-        const lat2 = (last.latitude * Math.PI) / 180;
-        const y = Math.sin(dLon) * Math.cos(lat2);
-        const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-        const brng = (Math.atan2(y, x) * 180) / Math.PI;
-        thetaDegrees = Number((((brng % 360) + 360) % 360).toFixed(1));
-      } else {
-        thetaDegrees = 0;
-      }
-      const thetaRadians = thetaDegrees !== undefined ? Number(((thetaDegrees * Math.PI) / 180).toFixed(4)) : undefined;
-      const thetaCompass = thetaDegrees !== undefined ? getCompassDirection(thetaDegrees) : undefined;
-
-      onProgress?.({
-        samplesCollected: validReadings.length,
-        targetSamples,
-        currentAccuracy: finalAccuracy,
-        bestAccuracy: finalAccuracy,
-        isLocked: true,
-        thetaDegrees,
-        stageText: `🔒 Location Locked at [${finalLat}, ${finalLng}] (±${finalAccuracy}m)`,
-      });
+      const lat = Number(pos.coords.latitude.toFixed(6));
+      const lng = Number(pos.coords.longitude.toFixed(6));
+      const accuracy = Math.round(pos.coords.accuracy || 10);
+      const isUnder50m = accuracy <= targetAccuracy;
 
       resolve({
-        latitude: finalLat,
-        longitude: finalLng,
-        accuracyMeters: finalAccuracy,
-        sampleCount: validReadings.length,
-        fixQuality,
-        hdopEstimate,
-        satellitesEstimated,
-        thetaDegrees,
-        thetaCompass,
-        thetaRadians,
-        readings: validReadings,
-        timestamp: Date.now(),
-      });
-    };
-
-    const handleNewFix = (pos: GeolocationPosition) => {
-      const reading: GpsReading = {
-        latitude: pos.coords.latitude,
-        longitude: pos.coords.longitude,
-        accuracy: pos.coords.accuracy,
+        latitude: lat,
+        longitude: lng,
+        accuracyMeters: accuracy,
         altitude: pos.coords.altitude,
         speed: pos.coords.speed,
         heading: pos.coords.heading,
         timestamp: pos.timestamp || Date.now(),
-      };
+        isUnder50m,
+      });
+    };
 
-      if (!bestReading || reading.accuracy <= bestReading.accuracy) {
-        bestReading = reading;
+    const handlePosition = (pos: GeolocationPosition) => {
+      const accuracy = Math.round(pos.coords.accuracy || 999);
+
+      if (!bestPos || pos.coords.accuracy < bestPos.coords.accuracy) {
+        bestPos = pos;
       }
 
-      collectedReadings.push(reading);
-      const curBest = bestReading.accuracy;
+      const bestAcc = Math.round(bestPos.coords.accuracy || accuracy);
+      const isUnder50 = bestAcc <= targetAccuracy;
 
-      onProgress?.({
-        samplesCollected: collectedReadings.length,
-        targetSamples,
-        currentAccuracy: Number(reading.accuracy.toFixed(1)),
-        bestAccuracy: Number(curBest.toFixed(1)),
-        isLocked: true,
-        stageText: `🎯 Acquired Location Fix [${reading.latitude.toFixed(5)}, ${reading.longitude.toFixed(5)}] (±${curBest.toFixed(1)}m)`,
+      options?.onProgress?.({
+        currentAccuracy: accuracy,
+        bestAccuracy: bestAcc,
+        statusText: isUnder50
+          ? `GPS Locked: ±${bestAcc}m (Accurate under 50m)`
+          : `Refining satellite signal: ±${accuracy}m... (Target: <50m)`,
+        isUnder50m: isUnder50,
       });
 
-      // Rapid completion conditions:
-      // If we reached target samples OR if we have at least 1 reading with acceptable accuracy (<= 25m)
-      if (collectedReadings.length >= targetSamples) {
-        processResultsAndResolve();
-      } else if (collectedReadings.length >= 1 && !settlingTimer) {
-        // Wait at most 1.2s to collect a second refined reading, then resolve
-        settlingTimer = setTimeout(() => {
-          processResultsAndResolve();
-        }, 1200);
+      // Exceptional satellite fix (<= 15m): lock immediately
+      if (accuracy <= 15) {
+        finishWithPosition(pos);
+        return;
+      }
+
+      // If accuracy meets target under 50m
+      if (accuracy <= targetAccuracy) {
+        // Wait at most 800ms to allow fine satellite settling, then resolve
+        if (!settlingTimer) {
+          settlingTimer = setTimeout(() => {
+            if (bestPos) {
+              finishWithPosition(bestPos);
+            }
+          }, 800);
+        }
       }
     };
 
-    // Timeout fallback: process whatever readings we have so far
+    // Overall timeout fallback
     timeoutTimer = setTimeout(() => {
-      if (collectedReadings.length > 0 || bestReading) {
-        processResultsAndResolve();
+      if (bestPos) {
+        finishWithPosition(bestPos);
       } else {
         cleanup();
-        reject(new Error('GPS timeout: Satellite signal took too long. Check device location permissions.'));
+        reject(new Error('GPS satellite signal took too long. Please ensure device location is turned ON with high accuracy.'));
       }
-    }, mergedConfig.timeoutMs);
+    }, timeoutMs);
 
-    onProgress?.({
-      samplesCollected: 0,
-      targetSamples,
-      currentAccuracy: 0,
-      bestAccuracy: 0,
-      isLocked: false,
-      stageText: '📡 Querying Live Hardware GPS Coordinates...',
-    });
-
-    try {
-      // 1. Immediate fast-fix via getCurrentPosition (works immediately on all devices)
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          handleNewFix(pos);
-        },
-        (err) => {
-          console.warn('Initial fast GPS fix warning:', err);
-          if (collectedReadings.length === 0) {
-            onProgress?.({
-              samplesCollected: 0,
-              targetSamples,
-              currentAccuracy: 0,
-              bestAccuracy: 0,
-              isLocked: false,
-              stageText: '📡 Searching for GPS satellite signal...',
-            });
-          }
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 6000,
-          maximumAge: 3000,
+    // 1. Fast immediate lock attempt via getCurrentPosition
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        handlePosition(pos);
+      },
+      (err) => {
+        console.warn('Initial GPS query notice:', err);
+        if (err.code === 1) { // PERMISSION_DENIED
+          cleanup();
+          reject(new Error('Location access permission was denied. Please allow location permissions in your browser.'));
         }
-      );
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 0,
+      }
+    );
 
-      // 2. Continuous watch for multi-sample refinement
+    // 2. Continuous watchPosition to refine down to under 50m
+    try {
       watchId = navigator.geolocation.watchPosition(
         (pos) => {
-          handleNewFix(pos);
+          handlePosition(pos);
         },
         (err) => {
-          console.warn('Robot GPS hardware fix warning:', err);
-          if (collectedReadings.length > 0) {
-            processResultsAndResolve();
-          } else {
+          console.warn('GPS continuous watch notice:', err);
+          if (err.code === 1) {
             cleanup();
-            reject(new Error(`GPS Sensor Error: ${err.message || 'Permission denied or signal unavailable'}`));
+            reject(new Error('Location access permission was denied. Please allow location permissions in your browser.'));
+          } else if (bestPos) {
+            finishWithPosition(bestPos);
           }
         },
         {
           enableHighAccuracy: true,
-          maximumAge: 3000,
-          timeout: mergedConfig.timeoutMs,
+          timeout: timeoutMs,
+          maximumAge: 0,
         }
       );
-    } catch (e: any) {
-      cleanup();
-      reject(e);
+    } catch (e) {
+      console.warn('Error starting watchPosition:', e);
     }
   });
+}
+
+/**
+ * Backward compatibility wrapper.
+ */
+export async function captureRobotPrecisionGps(
+  _config: Partial<RobotGpsConfig> = {},
+  onProgress?: (status: {
+    samplesCollected: number;
+    targetSamples: number;
+    currentAccuracy: number;
+    bestAccuracy: number;
+    isLocked: boolean;
+    stageText: string;
+    thetaDegrees?: number;
+  }) => void
+): Promise<RobotGpsResult> {
+  onProgress?.({
+    samplesCollected: 0,
+    targetSamples: 1,
+    currentAccuracy: 0,
+    bestAccuracy: 0,
+    isLocked: false,
+    stageText: '📡 Querying Hardware GPS (Target: <50m)...',
+  });
+
+  const res = await captureDeviceGps({
+    maxTargetAccuracyMeters: 50,
+    timeoutMs: 5000,
+    onProgress: (info) => {
+      onProgress?.({
+        samplesCollected: 1,
+        targetSamples: 1,
+        currentAccuracy: info.currentAccuracy,
+        bestAccuracy: info.bestAccuracy,
+        isLocked: info.isUnder50m,
+        stageText: info.statusText,
+      });
+    }
+  });
+
+  const heading = res.heading || 0;
+  const compass = getCompassDirection(heading);
+
+  onProgress?.({
+    samplesCollected: 1,
+    targetSamples: 1,
+    currentAccuracy: res.accuracyMeters,
+    bestAccuracy: res.accuracyMeters,
+    isLocked: true,
+    thetaDegrees: heading,
+    stageText: `🔒 Location Locked [${res.latitude}, ${res.longitude}] (±${res.accuracyMeters}m ${res.isUnder50m ? '<50m verified' : ''})`,
+  });
+
+  return {
+    latitude: res.latitude,
+    longitude: res.longitude,
+    accuracyMeters: res.accuracyMeters,
+    sampleCount: 1,
+    fixQuality: res.accuracyMeters <= 20 ? 'EXCELLENT' : res.accuracyMeters <= 50 ? 'GOOD' : 'FAIR',
+    hdopEstimate: Number((res.accuracyMeters / 5).toFixed(2)),
+    satellitesEstimated: 12,
+    thetaDegrees: heading,
+    thetaCompass: compass,
+    thetaRadians: Number(((heading * Math.PI) / 180).toFixed(4)),
+    readings: [{
+      latitude: res.latitude,
+      longitude: res.longitude,
+      accuracy: res.accuracyMeters,
+      altitude: res.altitude,
+      speed: res.speed,
+      heading: res.heading,
+      timestamp: res.timestamp,
+    }],
+    timestamp: res.timestamp,
+  };
 }

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Package, Plus, MapPin, Bot, Phone, User, Clock, X, Check, Crosshair, Trash2, Edit3, Boxes, Download } from 'lucide-react';
+import { Package, Plus, MapPin, Navigation, Phone, User, Clock, X, Check, Crosshair, Trash2, Edit3, Boxes, Download } from 'lucide-react';
 import { StockPickupPoint } from '../../types/logisticsNetwork';
 
 interface StockPickupModalProps {
@@ -9,7 +9,8 @@ interface StockPickupModalProps {
   onSavePoint: (point: StockPickupPoint) => void;
   onDeletePoint: (pointId: string) => void;
   onStartPinDropForPoint: (pointId: string) => void;
-  onTriggerRobotGpsForPoint: (pointId: string) => void;
+  onCaptureGpsForPoint?: (pointId: string) => void;
+  onTriggerRobotGpsForPoint?: (pointId: string) => void;
   onZoomToPoint?: (point: StockPickupPoint) => void;
   isCapturingGps?: boolean;
 }
@@ -21,10 +22,12 @@ export const StockPickupModal: React.FC<StockPickupModalProps> = ({
   onSavePoint,
   onDeletePoint,
   onStartPinDropForPoint,
+  onCaptureGpsForPoint,
   onTriggerRobotGpsForPoint,
   onZoomToPoint,
   isCapturingGps = false,
 }) => {
+  const handleGpsForPoint = onCaptureGpsForPoint || onTriggerRobotGpsForPoint;
   const [editingPoint, setEditingPoint] = useState<StockPickupPoint | null>(null);
   const [isCreatingNew, setIsCreatingNew] = useState<boolean>(false);
 
@@ -220,15 +223,15 @@ export const StockPickupModal: React.FC<StockPickupModalProps> = ({
                 </button>
               </div>
 
-              {/* Geo Location Pin & Robot GPS Capture Bar */}
-              <div className="bg-white border border-amber-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+              {/* Geo Location Pin & GPS Capture Bar */}
+              <div className="bg-white border border-emerald-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
                 <div>
                   <span className="text-xs font-bold text-slate-900 block flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-amber-600" />
-                    <span>Coordinates & Robot GPS Sync</span>
+                    <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Coordinates & GPS Location Capture</span>
                   </span>
                   <span className="text-[10px] text-slate-500">
-                    Capture exact loading bay coordinates with sub-meter robot precision.
+                    Capture exact loading bay coordinates using device GPS (Accurate under 50m).
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -251,16 +254,16 @@ export const StockPickupModal: React.FC<StockPickupModalProps> = ({
                     type="button"
                     onClick={() => {
                       if (editingPoint) {
-                        onTriggerRobotGpsForPoint(editingPoint.id);
+                        handleGpsForPoint?.(editingPoint.id);
                       } else {
-                        onTriggerRobotGpsForPoint('new');
+                        handleGpsForPoint?.('new');
                       }
                     }}
                     disabled={isCapturingGps}
-                    className="px-3 py-1 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-700 hover:to-indigo-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    className="px-3 py-1 bg-gradient-to-r from-emerald-600 to-indigo-600 hover:from-emerald-700 hover:to-indigo-700 text-white rounded-lg text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                   >
-                    <Bot className="w-3.5 h-3.5 animate-pulse" />
-                    <span>{isCapturingGps ? 'Locking...' : '🤖 Robot GPS'}</span>
+                    <Navigation className="w-3.5 h-3.5" />
+                    <span>{isCapturingGps ? 'Capturing (<50m)...' : '📍 Capture GPS (<50m)'}</span>
                   </button>
                 </div>
               </div>
@@ -535,11 +538,12 @@ export const StockPickupModal: React.FC<StockPickupModalProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => onTriggerRobotGpsForPoint(pt.id)}
-                        className="text-[10px] text-cyan-700 hover:text-cyan-900 font-bold bg-cyan-50 px-2 py-0.5 rounded-lg border border-cyan-200 cursor-pointer flex items-center gap-1"
+                        onClick={() => handleGpsForPoint?.(pt.id)}
+                        className="text-[10px] text-emerald-700 hover:text-emerald-900 font-bold bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200 cursor-pointer flex items-center gap-1"
+                        title="Capture device GPS for this pickup point"
                       >
-                        <Bot className="w-3 h-3" />
-                        <span>Robot GPS</span>
+                        <Navigation className="w-3 h-3" />
+                        <span>Capture GPS</span>
                       </button>
                     </div>
                   </div>

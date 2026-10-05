@@ -66,7 +66,7 @@ export default function LoginModal({ users, onLogin, onResetPassword }: LoginMod
         (err) => {
           setLocationStatus('GPS Signal Offline (Using Factory IP Terminal)');
         },
-        { timeout: 5000 }
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
       );
     } else {
       setLocationStatus('GPS Not Supported (Terminal Logged)');

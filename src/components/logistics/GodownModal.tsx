@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Warehouse, MapPin, Bot, Phone, User, Clock, Package, X, Check, Crosshair, Trash2 } from 'lucide-react';
+import { Warehouse, MapPin, Navigation, Phone, User, Clock, Package, X, Check, Crosshair, Trash2 } from 'lucide-react';
 import { GodownFacility } from '../../types/logisticsNetwork';
 
 interface GodownModalProps {
@@ -8,7 +8,8 @@ interface GodownModalProps {
   onClose: () => void;
   onSave: (updated: GodownFacility) => void;
   onStartPinDrop: () => void;
-  onTriggerRobotGps: () => void;
+  onCaptureGps?: () => void;
+  onTriggerRobotGps?: () => void;
   isCapturingGps?: boolean;
 }
 
@@ -18,10 +19,12 @@ export const GodownModal: React.FC<GodownModalProps> = ({
   onClose,
   onSave,
   onStartPinDrop,
+  onCaptureGps,
   onTriggerRobotGps,
   isCapturingGps = false,
 }) => {
   const [form, setForm] = useState<GodownFacility>(godown);
+  const handleGps = onCaptureGps || onTriggerRobotGps;
 
   // Sync internal form when godown prop updates
   React.useEffect(() => {
@@ -75,15 +78,15 @@ export const GodownModal: React.FC<GodownModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
-          {/* Quick Action Banner: Pin Drop & Robot GPS */}
-          <div className="bg-gradient-to-r from-amber-500/10 via-indigo-50 to-cyan-500/10 border border-amber-200/80 rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3">
+          {/* Quick Action Banner: Pin Drop & Capture GPS */}
+          <div className="bg-gradient-to-r from-amber-500/10 via-indigo-50 to-emerald-500/10 border border-amber-200/80 rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3">
             <div>
               <span className="text-xs font-bold text-slate-900 block flex items-center gap-1.5">
                 <MapPin className="w-4 h-4 text-amber-600" />
-                <span>Godown Geo-Positioning & Calibration</span>
+                <span>Godown Geo-Positioning & Location Capture</span>
               </span>
               <span className="text-[11px] text-slate-600 block">
-                Sync with robot-grade high accuracy GPS at factory or click map to mark location.
+                Capture exact coordinates using device GPS at warehouse/factory or click map to mark location.
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -101,13 +104,13 @@ export const GodownModal: React.FC<GodownModalProps> = ({
               </button>
               <button
                 type="button"
-                onClick={onTriggerRobotGps}
+                onClick={handleGps}
                 disabled={isCapturingGps}
-                className="px-3.5 py-1.5 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all"
-                title="Sync Godown location using multi-satellite robot GPS lock"
+                className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-indigo-600 hover:from-emerald-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-all"
+                title="Update Godown location using your device GPS"
               >
-                <Bot className="w-3.5 h-3.5 animate-pulse" />
-                <span>{isCapturingGps ? 'Locking GPS...' : '🤖 Sync Robot GPS'}</span>
+                <Navigation className="w-3.5 h-3.5" />
+                <span>{isCapturingGps ? 'Capturing GPS...' : '📍 Capture GPS Location'}</span>
               </button>
             </div>
           </div>
@@ -212,10 +215,32 @@ export const GodownModal: React.FC<GodownModalProps> = ({
               <label className="block text-[10px] font-bold text-slate-600 uppercase mb-0.5">
                 GPS Accuracy
               </label>
-              <div className="px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-mono font-bold bg-white text-emerald-700 flex items-center gap-1">
-                <span>±{form.accuracyMeters ? form.accuracyMeters.toFixed(1) : '2.1'}m</span>
-                <span className="text-[9px] text-slate-400">Lock</span>
+              <div className={`px-2.5 py-1.5 border rounded-lg text-xs font-mono font-bold flex items-center justify-between ${
+                form.accuracyMeters && form.accuracyMeters <= 50
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                  : 'border-slate-300 bg-white text-slate-700'
+              }`}>
+                <span>±{form.accuracyMeters ? form.accuracyMeters.toFixed(1) : '10.0'}m</span>
+                <span className={`text-[9px] px-1 py-0.2 rounded font-bold ${
+                  form.accuracyMeters && form.accuracyMeters <= 50
+                    ? 'bg-emerald-200 text-emerald-900'
+                    : 'bg-slate-100 text-slate-700'
+                }`}>
+                  {form.accuracyMeters && form.accuracyMeters <= 50 ? '<50m ✓' : 'GNSS'}
+                </span>
               </div>
+            </div>
+            <div className="col-span-3 pt-1 flex items-center justify-between">
+              <span className="text-[10px] text-slate-500 font-medium">Standing at warehouse/factory now?</span>
+              <button
+                type="button"
+                onClick={handleGps}
+                disabled={isCapturingGps}
+                className="text-[11px] text-indigo-700 hover:text-indigo-900 font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                <Navigation className="w-3 h-3 text-indigo-600" />
+                <span>{isCapturingGps ? 'Capturing GPS (<50m)...' : 'Update Location via Device GPS (<50m)'}</span>
+              </button>
             </div>
           </div>
 

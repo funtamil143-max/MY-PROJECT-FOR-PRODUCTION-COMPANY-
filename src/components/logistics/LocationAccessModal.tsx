@@ -126,8 +126,8 @@ export const LocationAccessModal: React.FC<LocationAccessModalProps> = ({
         }
       },
       {
-        enableHighAccuracy: useHighPrecision,
-        timeout: 12000,
+        enableHighAccuracy: true,
+        timeout: 5000,
         maximumAge: 0,
       }
     );
@@ -403,7 +403,7 @@ export const LocationAccessModal: React.FC<LocationAccessModalProps> = ({
                       Allow Device Location Access
                     </h4>
                     <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
-                      Your browser will display a permission prompt. Granting access enables robot-grade GPS lock, auto-tagging shop coordinates, and real-time delivery tracking.
+                      Your browser will display a permission prompt. Granting access enables direct device GPS lock, auto-tagging shop coordinates, and real-time delivery tracking.
                     </p>
                   </div>
 
@@ -434,8 +434,8 @@ export const LocationAccessModal: React.FC<LocationAccessModalProps> = ({
                       <span><strong>Central Godown:</strong> Lock exact warehouse coordinates and loading bay origin.</span>
                     </div>
                     <div className="flex items-start gap-2.5 text-slate-700">
-                      <Bot className="w-4 h-4 text-cyan-600 shrink-0 mt-0.5" />
-                      <span><strong>Robot-Grade GPS Sync:</strong> High-precision sub-meter coordinates with theta heading angle.</span>
+                      <Navigation className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                      <span><strong>Store & Dispatch GPS:</strong> Real-time device GPS coordinates for retail stores and live tracking.</span>
                     </div>
                     <div className="flex items-start gap-2.5 text-slate-700">
                       <Boxes className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />

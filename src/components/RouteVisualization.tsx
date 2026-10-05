@@ -107,18 +107,15 @@ import {
   INITIAL_STOCK_PICKUP_POINTS,
 } from '../types/logisticsNetwork';
 import {
-  RobotGpsConfig,
-  DEFAULT_ROBOT_GPS_CONFIG,
-  captureRobotPrecisionGps,
-  RobotGpsResult,
+  captureDeviceGps,
+  DeviceGpsResult,
 } from '../utils/robotGps';
 import { GodownModal } from './logistics/GodownModal';
 import { StockPickupModal } from './logistics/StockPickupModal';
 import { DistributionLinesModal } from './logistics/DistributionLinesModal';
-import { RobotGpsHUD, RobotGpsProgressState } from './logistics/RobotGpsHUD';
-import { RobotGpsCalibrationModal } from './logistics/RobotGpsCalibrationModal';
 import { LocationAccessModal, LocationPermissionState } from './logistics/LocationAccessModal';
 import { ManageSalespersonsModal } from './logistics/ManageSalespersonsModal';
+import { MapsGroundingExplorerModal } from './logistics/MapsGroundingExplorerModal';
 
 export interface CustomRoutePoint {
   id: string;
@@ -822,6 +819,8 @@ export default function RouteVisualization({
   const [storeFormAddress, setStoreFormAddress] = useState('');
   const [storeFormLat, setStoreFormLat] = useState<number>(DEFAULT_DEPOT.latitude);
   const [storeFormLng, setStoreFormLng] = useState<number>(DEFAULT_DEPOT.longitude);
+  const [storeFormAccuracy, setStoreFormAccuracy] = useState<number | null>(null);
+  const [gpsLiveStatus, setGpsLiveStatus] = useState<string | null>(null);
   const [storeFormCategory, setStoreFormCategory] = useState<'Wholesaler' | 'Retail Shop' | 'Supermarket' | 'Bakery/Tea Stall' | 'Canteen' | 'Other'>('Retail Shop');
   const [storeFormAssignedDays, setStoreFormAssignedDays] = useState<DayOfWeek[]>(['Monday', 'Wednesday', 'Friday']);
   const [storeFormAssignedSalesperson, setStoreFormAssignedSalesperson] = useState('K. Saravanan');
@@ -847,11 +846,7 @@ export default function RouteVisualization({
     mapEngine: 'google' | 'leaflet';
     googleMapType: 'roadmap' | 'satellite' | 'hybrid' | 'terrain';
     mapTileLayer: 'standard' | 'satellite';
-    robotGpsEnabled: boolean;
-    robotGpsMinAccuracy: number;
-    robotGpsSampleCount: number;
-    robotGpsOutlierFilter: boolean;
-    robotGpsCaptureTheta: boolean;
+    gpsHighAccuracy: boolean;
     showGodownMarker: boolean;
     showStockPickupPoints: boolean;
     showDistributionLines: boolean;
@@ -864,11 +859,7 @@ export default function RouteVisualization({
         return {
           mapEngine: 'google',
           googleMapType: 'roadmap',
-          robotGpsEnabled: true,
-          robotGpsMinAccuracy: 5,
-          robotGpsSampleCount: 5,
-          robotGpsOutlierFilter: true,
-          robotGpsCaptureTheta: true,
+          gpsHighAccuracy: true,
           showGodownMarker: true,
           showStockPickupPoints: true,
           showDistributionLines: true,
@@ -886,11 +877,7 @@ export default function RouteVisualization({
       mapEngine: 'google',
       googleMapType: 'roadmap',
       mapTileLayer: 'standard',
-      robotGpsEnabled: true,
-      robotGpsMinAccuracy: 5,
-      robotGpsSampleCount: 5,
-      robotGpsOutlierFilter: true,
-      robotGpsCaptureTheta: true,
+      gpsHighAccuracy: true,
       showGodownMarker: true,
       showStockPickupPoints: true,
       showDistributionLines: true,
@@ -934,14 +921,14 @@ export default function RouteVisualization({
     localStorage.setItem('snack_stock_pickup_points', JSON.stringify(stockPickupPoints));
   }, [stockPickupPoints]);
 
-  // Logistics & Robot GPS Modals
+  // Logistics & Location Modals
   const [showGodownModal, setShowGodownModal] = useState<boolean>(false);
   const [showStockPickupModal, setShowStockPickupModal] = useState<boolean>(false);
   const [showDistributionLinesModal, setShowDistributionLinesModal] = useState<boolean>(false);
-  const [showRobotCalibrationModal, setShowRobotCalibrationModal] = useState<boolean>(false);
+  const [showMapsGroundingModal, setShowMapsGroundingModal] = useState<boolean>(false);
   const [pinDropperTarget, setPinDropperTarget] = useState<'store' | 'godown' | 'pickup'>('store');
   const [pinDropperPickupPointId, setPinDropperPickupPointId] = useState<string | null>(null);
-  const [robotGpsProgress, setRobotGpsProgress] = useState<RobotGpsProgressState | null>(null);
+  const [isCapturingGps, setIsCapturingGps] = useState<boolean>(false);
   const [logisticsToast, setLogisticsToast] = useState<{ title: string; message: string } | null>(null);
 
   // Location Access Permission & Request States
@@ -1510,6 +1497,7 @@ export default function RouteVisualization({
     setStoreFormSequence(stores.length + 1);
     setStoreFormNotes('');
     setStoreFormAssignedDate('');
+    setStoreFormAccuracy(null);
     setShowStoreModal(true);
   };
 
@@ -1522,6 +1510,7 @@ export default function RouteVisualization({
     setStoreFormAddress(store.address || store.location.address || '');
     setStoreFormLat(store.location.latitude);
     setStoreFormLng(store.location.longitude);
+    setStoreFormAccuracy(store.location.accuracyMeters || null);
     setStoreFormAssignedDays(store.assignedDays || []);
     setStoreFormAssignedSalesperson(store.assignedSalesperson || 'K. Saravanan');
     setStoreFormSequence(store.routeSequence || 1);
@@ -1545,7 +1534,7 @@ export default function RouteVisualization({
       latitude: Number(storeFormLat),
       longitude: Number(storeFormLng),
       address: storeFormAddress.trim() || storeFormName.trim(),
-      accuracyMeters: 5,
+      accuracyMeters: storeFormAccuracy || 15,
     };
 
     if (editingStore) {
@@ -1679,105 +1668,173 @@ export default function RouteVisualization({
     setShowStoreModal(true);
   };
 
-  // High-Precision Robot GPS Capture Handler
-  const handleTriggerRobotGps = async (
+  // High-Reliability Device GPS Capture & Location Update Handler (< 50m Target)
+  const handleCaptureGpsLocation = async (
     target: 'godown' | 'pickup' | 'store' | 'bill' | 'counter',
     pickupPointId?: string
   ) => {
-    const targetTitle = target === 'godown'
-      ? 'Central Godown (Warehouse)'
-      : target === 'pickup'
-      ? 'Stock Pickup Bay'
-      : target === 'store'
-      ? 'Store Location'
-      : target === 'bill'
-      ? 'Billing Counter'
-      : 'Counter Location';
-
-    setRobotGpsProgress({
-      active: true,
-      stageText: '📡 Calibrating Robot GNSS Hardware...',
-      currentAccuracy: 0,
-      bestAccuracy: 0,
-      samplesCollected: 0,
-      targetSamples: mapSettings.robotGpsSampleCount || 5,
-      isLocked: false,
-      targetTitle,
-    });
+    setIsCapturingGps(true);
+    setIsGettingGps(true);
 
     try {
-      const res = await captureRobotPrecisionGps({
-        enabled: mapSettings.robotGpsEnabled,
-        minAccuracyMeters: mapSettings.robotGpsMinAccuracy || 5,
-        sampleCount: mapSettings.robotGpsSampleCount || 5,
-        outlierFilter: mapSettings.robotGpsOutlierFilter,
-        captureTheta: mapSettings.robotGpsCaptureTheta,
-      }, (status) => {
-        setRobotGpsProgress(prev => prev ? { ...prev, ...status } : null);
+      const res = await captureDeviceGps({
+        maxTargetAccuracyMeters: 50,
+        timeoutMs: 5000,
+        onProgress: (info) => {
+          setGpsLiveStatus(info.statusText);
+        }
       });
 
       const resolvedAddr = await fetchAddressFromCoords(res.latitude, res.longitude);
 
-      setTimeout(() => {
-        setRobotGpsProgress(null);
-
-        if (target === 'godown') {
-          setGodownFacility(prev => ({
-            ...prev,
-            latitude: res.latitude,
-            longitude: res.longitude,
-            accuracyMeters: res.accuracyMeters,
-            thetaBearing: res.thetaDegrees,
-            address: resolvedAddr || prev.address,
-            updatedAt: new Date().toISOString(),
+      if (target === 'godown') {
+        setGodownFacility(prev => ({
+          ...prev,
+          latitude: res.latitude,
+          longitude: res.longitude,
+          accuracyMeters: res.accuracyMeters,
+          address: resolvedAddr || prev.address,
+          updatedAt: new Date().toISOString(),
+        }));
+        setLogisticsToast({
+          title: res.isUnder50m ? '🎯 Central Godown GPS (<50m)' : '🏢 Central Godown Location Updated',
+          message: `Captured GPS coordinates [${res.latitude.toFixed(5)}, ${res.longitude.toFixed(5)}] (±${res.accuracyMeters}m ${res.isUnder50m ? 'under 50m verified' : ''})!`,
+        });
+      } else if (target === 'pickup') {
+        if (pickupPointId && pickupPointId !== 'new') {
+          setStockPickupPoints(prev => prev.map(p => {
+            if (p.id !== pickupPointId) return p;
+            return {
+              ...p,
+              latitude: res.latitude,
+              longitude: res.longitude,
+              accuracyMeters: res.accuracyMeters,
+              address: resolvedAddr || p.address,
+            };
           }));
-          setLogisticsToast({
-            title: '🏢 Godown Robot GPS Locked',
-            message: `Locked at [${res.latitude.toFixed(5)}, ${res.longitude.toFixed(5)}] (θ=${res.thetaDegrees || 0}°) with ±${res.accuracyMeters}m precision!`,
-          });
-        } else if (target === 'pickup') {
-          if (pickupPointId && pickupPointId !== 'new') {
-            setStockPickupPoints(prev => prev.map(p => {
-              if (p.id !== pickupPointId) return p;
-              return {
-                ...p,
-                latitude: res.latitude,
-                longitude: res.longitude,
-                accuracyMeters: res.accuracyMeters,
-                thetaBearing: res.thetaDegrees,
-                address: resolvedAddr || p.address,
-              };
-            }));
-          }
-          setLogisticsToast({
-            title: '📦 Stock Pickup Point Synced',
-            message: `Locked loading bay coordinates (θ=${res.thetaDegrees || 0}°) with ±${res.accuracyMeters}m robot accuracy!`,
-          });
-        } else if (target === 'store') {
-          setStoreFormLat(res.latitude);
-          setStoreFormLng(res.longitude);
+        }
+        setLogisticsToast({
+          title: res.isUnder50m ? '🎯 Stock Pickup Point GPS (<50m)' : '📦 Stock Pickup Point Location Updated',
+          message: `Captured coordinates [${res.latitude.toFixed(5)}, ${res.longitude.toFixed(5)}] (±${res.accuracyMeters}m ${res.isUnder50m ? 'under 50m verified' : ''})!`,
+        });
+      } else if (target === 'store') {
+        setStoreFormLat(res.latitude);
+        setStoreFormLng(res.longitude);
+        setStoreFormAccuracy(res.accuracyMeters);
+        if (resolvedAddr) {
           setStoreFormAddress(resolvedAddr);
-          setLogisticsToast({
-            title: '🏪 Shop Location Synced',
-            message: `Accurate shop coordinates locked: ±${res.accuracyMeters}m error radius.`,
-          });
-        } else if (target === 'bill') {
-          setBillCoords({ lat: res.latitude, lng: res.longitude });
+        }
+        setLogisticsToast({
+          title: res.isUnder50m ? '🎯 Accurate GPS Locked (<50m)' : '🏪 Shop Location Captured',
+          message: `Coordinates [${res.latitude.toFixed(5)}, ${res.longitude.toFixed(5)}] locked ±${res.accuracyMeters}m ${res.isUnder50m ? '(Verified under 50m)' : ''}. Address updated.`,
+        });
+      } else if (target === 'bill') {
+        setBillCoords({ lat: res.latitude, lng: res.longitude });
+        if (resolvedAddr) {
           setBillShopAddress(resolvedAddr);
-        } else {
-          setCounterCoords({ lat: res.latitude, lng: res.longitude });
+        }
+        setLogisticsToast({
+          title: res.isUnder50m ? '🎯 Verified Counter GPS (<50m)' : '🧾 Billing Counter GPS Locked',
+          message: `Locked counter at [${res.latitude.toFixed(5)}, ${res.longitude.toFixed(5)}] (±${res.accuracyMeters}m ${res.isUnder50m ? 'under 50m verified' : ''}).`,
+        });
+      } else {
+        setCounterCoords({ lat: res.latitude, lng: res.longitude });
+        if (resolvedAddr) {
           setNewShopAddress(resolvedAddr);
         }
-      }, 400);
-    } catch (err: any) {
-      console.warn('Robot GPS capture error:', err);
-      setRobotGpsProgress(null);
-      if (err.message?.toLowerCase().includes('denied') || err.message?.toLowerCase().includes('permission') || err.code === 1) {
-        handleOpenLocationAccessRequest('Robot-grade precision GPS requires browser location permission. Please allow access below to lock high-precision coordinates.');
-      } else {
-        handleOpenLocationAccessRequest(`GPS Sensor Notice: ${err.message || 'Location signal unavailable. Check device settings.'}`);
+        setLogisticsToast({
+          title: res.isUnder50m ? '🎯 Verified Counter GPS (<50m)' : '📍 Counter GPS Locked',
+          message: `Locked location at [${res.latitude.toFixed(5)}, ${res.longitude.toFixed(5)}] (±${res.accuracyMeters}m ${res.isUnder50m ? 'under 50m verified' : ''}).`,
+        });
       }
+    } catch (err: any) {
+      console.warn('Device GPS capture notice:', err);
+      if (err.message?.toLowerCase().includes('denied') || err.message?.toLowerCase().includes('permission') || err.code === 1) {
+        handleOpenLocationAccessRequest('Location access permission was denied. Please allow location access in your browser to capture GPS coordinates.');
+      } else {
+        handleOpenLocationAccessRequest(`GPS Notice: ${err.message || 'Location signal unavailable. Check device GPS settings.'}`);
+      }
+    } finally {
+      setIsCapturingGps(false);
+      setIsGettingGps(false);
+      setIsSyncingAddressGps(false);
+      setGpsLiveStatus(null);
     }
+  };
+
+  const handleTriggerRobotGps = handleCaptureGpsLocation;
+
+  // Update specific store location directly with captured GPS (<50m target)
+  const handleUpdateStoreLocationWithGps = async (storeId: string) => {
+    setIsCapturingGps(true);
+    try {
+      const res = await captureDeviceGps({
+        maxTargetAccuracyMeters: 50,
+        timeoutMs: 5000,
+        onProgress: (info) => {
+          setGpsLiveStatus(info.statusText);
+        }
+      });
+      const resolvedAddr = await fetchAddressFromCoords(res.latitude, res.longitude);
+      setStores(prev => prev.map(s => {
+        if (s.id !== storeId) return s;
+        return {
+          ...s,
+          location: {
+            ...s.location,
+            latitude: res.latitude,
+            longitude: res.longitude,
+            address: resolvedAddr || s.location.address,
+            accuracyMeters: res.accuracyMeters,
+          },
+          updatedAt: new Date().toISOString(),
+        };
+      }));
+      setLogisticsToast({
+        title: res.isUnder50m ? '🎯 Store Location Updated (<50m)' : '📍 Store Location Updated',
+        message: `Updated store coordinates to [${res.latitude.toFixed(5)}, ${res.longitude.toFixed(5)}] (±${res.accuracyMeters}m ${res.isUnder50m ? 'verified under 50m' : ''})!`,
+      });
+    } catch (err: any) {
+      handleOpenLocationAccessRequest(err.message || 'Failed to capture GPS location.');
+    } finally {
+      setIsCapturingGps(false);
+      setGpsLiveStatus(null);
+    }
+  };
+
+  // Add a newly discovered Google Maps place into route stops / registered stores
+  const handleAddStoreFromGroundedPlace = (place: {
+    name: string;
+    address: string;
+    lat?: number;
+    lng?: number;
+    mapsUrl?: string;
+  }) => {
+    const targetLat = place.lat || godownFacility.latitude || DEFAULT_DEPOT.latitude;
+    const targetLng = place.lng || godownFacility.longitude || DEFAULT_DEPOT.longitude;
+    const newStore: StoreLocation = {
+      id: `store_gmap_${Date.now()}`,
+      shopName: place.name,
+      shopCategory: 'Retail Shop',
+      address: place.address,
+      location: {
+        latitude: targetLat,
+        longitude: targetLng,
+        address: place.address,
+        accuracyMeters: 15,
+      },
+      assignedDays: [selectedDayOfWeek === 'all' ? 'Monday' : selectedDayOfWeek],
+      assignedSalesperson: 'K. Saravanan',
+      routeSequence: stores.length + 1,
+      notes: place.mapsUrl ? `Verified Google Maps: ${place.mapsUrl}` : undefined,
+      active: true,
+      createdAt: new Date().toISOString(),
+    };
+    setStores(prev => [...prev, newStore]);
+    setLogisticsToast({
+      title: '📍 Store Added to Route',
+      message: `Added "${place.name}" with Google Maps verified details!`,
+    });
   };
 
   // Demo Fallback / Geocoding helper for entries without coordinates
@@ -1922,47 +1979,7 @@ export default function RouteVisualization({
   };
 
   const handleCaptureCurrentGps = (target: 'counter' | 'bill' = 'counter') => {
-    if (mapSettings.robotGpsEnabled) {
-      handleTriggerRobotGps(target);
-      return;
-    }
-
-    if (!navigator.geolocation) {
-      handleOpenLocationAccessRequest('Geolocation is not supported by your browser.');
-      return;
-    }
-    setIsGettingGps(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const coords = {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        };
-        if (target === 'bill') {
-          setBillCoords(coords);
-        } else {
-          setCounterCoords(coords);
-        }
-        setIsGettingGps(false);
-      },
-      (err) => {
-        console.warn('GPS error, setting approximate counter pin:', err);
-        if (err.code === err.PERMISSION_DENIED) {
-          handleOpenLocationAccessRequest('Location access was denied. Please allow location permissions in your browser to capture counter GPS.');
-        }
-        const fallback = {
-          lat: godownFacility.latitude + (Math.random() - 0.5) * 0.015,
-          lng: godownFacility.longitude + (Math.random() - 0.5) * 0.015,
-        };
-        if (target === 'bill') {
-          setBillCoords(fallback);
-        } else {
-          setCounterCoords(fallback);
-        }
-        setIsGettingGps(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+    handleCaptureGpsLocation(target);
   };
 
   // Reverse Geocoding Address from Coordinates
@@ -1998,54 +2015,7 @@ export default function RouteVisualization({
   };
 
   const handleSyncAddressWithGps = (target: 'bill' | 'counter') => {
-    if (mapSettings.robotGpsEnabled) {
-      handleTriggerRobotGps(target);
-      return;
-    }
-
-    if (!navigator.geolocation) {
-      handleOpenLocationAccessRequest('Geolocation is not supported by your browser.');
-      return;
-    }
-
-    setIsSyncingAddressGps(true);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const coords = {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        };
-        if (target === 'bill') {
-          setBillCoords(coords);
-        } else {
-          setCounterCoords(coords);
-        }
-
-        const resolvedAddr = await fetchAddressFromCoords(coords.lat, coords.lng);
-        if (target === 'bill') {
-          setBillShopAddress(resolvedAddr);
-        } else {
-          setNewShopAddress(resolvedAddr);
-        }
-        setIsSyncingAddressGps(false);
-      },
-      async (err) => {
-        console.warn('GPS error during address sync:', err);
-        if (err.code === err.PERMISSION_DENIED) {
-          handleOpenLocationAccessRequest('Location access was denied. Please allow location permissions in your browser to auto-fill address from GPS.');
-        }
-        const fallback = target === 'bill'
-          ? (billCoords || { lat: godownFacility.latitude, lng: godownFacility.longitude })
-          : (counterCoords || { lat: godownFacility.latitude, lng: godownFacility.longitude });
-        if (target === 'bill') {
-          setBillCoords(fallback);
-        } else {
-          setCounterCoords(fallback);
-        }
-        setIsSyncingAddressGps(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+    handleCaptureGpsLocation(target);
   };
 
   // Catalog products for billing
@@ -2879,7 +2849,7 @@ export default function RouteVisualization({
           handleOpenLocationAccessRequest('Could not determine your device location. Please ensure location services are enabled.');
         }
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
     );
   };
 
@@ -3902,7 +3872,7 @@ export default function RouteVisualization({
                 </span>
               </div>
               <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
-                Allow browser location permission to enable robot-grade GPS lock, auto-tag shop coordinates, and track delivery routes accurately.
+                Allow browser location permission to enable direct device GPS lock, auto-tag shop coordinates, and track delivery routes accurately.
               </p>
             </div>
           </div>
@@ -4065,6 +4035,20 @@ export default function RouteVisualization({
 
           {/* Store & Logistics Actions: Godown, Shops List, Pickup Points, Distribution Lines, Route Builder */}
           <div className="flex flex-wrap items-center gap-2">
+            {/* Google Maps AI Grounding Button */}
+            <button
+              type="button"
+              onClick={() => setShowMapsGroundingModal(true)}
+              className="px-3 py-1.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer border border-blue-400/40"
+              title="Discover nearby grocery shops, bakeries, tea stalls & wholesale mandis via Google Maps Grounding (gemini-2.5-flash)"
+            >
+              <MapPin className="w-3.5 h-3.5 text-amber-300" />
+              <span>Google Maps AI</span>
+              <span className="text-[9px] bg-blue-900/60 text-blue-200 px-1.5 py-0.2 rounded-full font-mono font-bold">
+                gemini-2.5-flash
+              </span>
+            </button>
+
             {/* 1. Mark Central Godown / Warehouse Button */}
             <button
               type="button"
@@ -6137,19 +6121,19 @@ export default function RouteVisualization({
                 )}
               </div>
 
-              {/* 5. ROBOT-GRADE HIGH-PRECISION GPS LOCK ENGINE */}
+              {/* 5. DEVICE GPS & LOCATION CAPTURE SETTINGS */}
               <div className="space-y-3 pt-3 border-t border-slate-100">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <Bot className="w-4 h-4 text-cyan-600 animate-pulse" />
-                    <span>Robot-Grade GPS Precision Engine (Theta θ & Accuracy Sync)</span>
+                    <Navigation className="w-4 h-4 text-emerald-600" />
+                    <span>Device GPS & Live Location Capture</span>
                   </h4>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-cyan-50 text-cyan-800 border border-cyan-300">
-                    {mapSettings.robotGpsEnabled ? '🤖 Robot Accuracy Active' : 'Standard Mode'}
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-50 text-emerald-800 border border-emerald-300">
+                    Live GPS Active
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 leading-relaxed">
-                  <strong>Map Setting Option:</strong> Location capture by sync with GPS must be accurate as a robot. Enforces zero-delay hardware GNSS queries, multi-sample fixes, multipath drift rejection, weighted centroid calculations, and Theta (θ) heading angle lock.
+                  Direct hardware GNSS & Wi-Fi geolocation capture. Fast, accurate, and seamlessly updates store locations, warehouse origin, and sales visits with real device coordinates.
                 </p>
 
                 {/* Location Access Request Status Row */}
@@ -6179,10 +6163,10 @@ export default function RouteVisualization({
                       </div>
                       <span className="text-[11px] text-slate-500 block mt-0.5">
                         {locationPermissionStatus === 'granted'
-                          ? 'Browser location access enabled for high-accuracy GPS.'
+                          ? 'Browser location access enabled for high-accuracy GPS capture.'
                           : locationPermissionStatus === 'denied'
                           ? 'Location permission blocked. Click button to view unblock instructions.'
-                          : 'Click to trigger browser prompt to allow device GPS location access.'}
+                          : 'Click to allow device GPS location access.'}
                       </span>
                     </div>
                   </div>
@@ -6202,138 +6186,47 @@ export default function RouteVisualization({
                   </button>
                 </div>
 
-                {/* Master Robot GPS Toggle */}
-                <label className="flex items-center justify-between p-3 rounded-xl border border-cyan-200 bg-cyan-50/40 hover:bg-cyan-50 cursor-pointer transition-colors">
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-7 h-7 rounded-lg bg-cyan-600 text-white flex items-center justify-center font-bold text-sm">
-                      🤖
-                    </span>
-                    <div>
-                      <span className="text-xs font-bold text-slate-900 block">
-                        Enable Robot-Grade Precision GPS Sync
-                      </span>
-                      <span className="text-[11px] text-slate-600">
-                        Location capture by sync with GPS must be accurate as a robot across godown, shops list, and stock pickup points.
-                      </span>
-                    </div>
+                {/* Instant Test GPS Button */}
+                <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-200/80 flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-xs font-bold text-emerald-950 block">Quick GPS Test & Current Coordinate Check</span>
+                    <span className="text-[10px] text-emerald-800 block">Click to verify that your device hardware GPS returns accurate coordinates.</span>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={mapSettings.robotGpsEnabled}
-                    onChange={(e) => setMapSettings(prev => ({ ...prev, robotGpsEnabled: e.target.checked }))}
-                    className="w-4 h-4 rounded text-cyan-600 focus:ring-cyan-500 cursor-pointer"
-                  />
-                </label>
-
-                {/* Tolerance & Sample Options */}
-                {mapSettings.robotGpsEnabled && (
-                  <div className="space-y-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
-                    {/* Minimum Accuracy Tolerance */}
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="text-[11px] font-bold text-slate-700 uppercase">
-                          Strict Accuracy Threshold
-                        </span>
-                        <span className="text-xs font-mono font-bold text-cyan-700">
-                          ±{mapSettings.robotGpsMinAccuracy} meters
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {[
-                          { meters: 3, label: '3m (RTK)' },
-                          { meters: 5, label: '5m (Robot)' },
-                          { meters: 10, label: '10m (Standard)' },
-                          { meters: 20, label: '20m (Permissive)' },
-                        ].map(opt => (
-                          <button
-                            key={opt.meters}
-                            type="button"
-                            onClick={() => setMapSettings(prev => ({ ...prev, robotGpsMinAccuracy: opt.meters }))}
-                            className={`py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                              mapSettings.robotGpsMinAccuracy === opt.meters
-                                ? 'bg-cyan-600 text-white shadow-xs'
-                                : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
-                            }`}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Multi-sample averaging count */}
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="text-[11px] font-bold text-slate-700 uppercase">
-                          Satellite Fix Sample Averaging
-                        </span>
-                        <span className="text-xs font-mono font-bold text-cyan-700">
-                          {mapSettings.robotGpsSampleCount} Fixes Averaged
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {[3, 5, 8, 10].map(cnt => (
-                          <button
-                            key={cnt}
-                            type="button"
-                            onClick={() => setMapSettings(prev => ({ ...prev, robotGpsSampleCount: cnt }))}
-                            className={`py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                              mapSettings.robotGpsSampleCount === cnt
-                                ? 'bg-cyan-600 text-white shadow-xs'
-                                : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
-                            }`}
-                          >
-                            {cnt} Fixes
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Theta Azimuth Orientation Lock Toggle */}
-                    <label className="flex items-center justify-between p-2.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100/70 cursor-pointer transition-colors">
-                      <div>
-                        <span className="text-xs font-bold text-slate-900 block flex items-center gap-1.5">
-                          <Compass className="w-3.5 h-3.5 text-cyan-600" />
-                          <span>Theta (θ) Heading & Bearing Angle Capture</span>
-                        </span>
-                        <span className="text-[10px] text-slate-500 block">
-                          Calibrate directional orientation angle (0°–360° θ) during GPS sync for precision robot vehicle pathfinding
-                        </span>
-                      </div>
-                      <input
-                        type="checkbox"
-                        checked={mapSettings.robotGpsCaptureTheta}
-                        onChange={(e) => setMapSettings(prev => ({ ...prev, robotGpsCaptureTheta: e.target.checked }))}
-                        className="w-4 h-4 rounded text-cyan-600 focus:ring-cyan-500 cursor-pointer"
-                      />
-                    </label>
-
-                    {/* Discard Outlier Multipath Drift */}
-                    <label className="flex items-center justify-between pt-1 cursor-pointer">
-                      <span className="text-xs text-slate-700 font-semibold">
-                        Discard Multipath Reflection Outliers
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={mapSettings.robotGpsOutlierFilter}
-                        onChange={(e) => setMapSettings(prev => ({ ...prev, robotGpsOutlierFilter: e.target.checked }))}
-                        className="w-4 h-4 rounded text-cyan-600 focus:ring-cyan-500 cursor-pointer"
-                      />
-                    </label>
-
-                    {/* Test & Calibrate Button */}
-                    <div className="pt-2 border-t border-slate-200">
-                      <button
-                        type="button"
-                        onClick={() => setShowRobotCalibrationModal(true)}
-                        className="w-full py-2 bg-gradient-to-r from-slate-900 to-cyan-950 hover:from-slate-800 hover:to-cyan-900 text-cyan-300 border border-cyan-600/40 font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
-                      >
-                        <Bot className="w-4 h-4 text-cyan-400" />
-                        <span>🤖 Test & Calibrate Robot GPS Sensor Now</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setIsCapturingGps(true);
+                      try {
+                        const res = await captureDeviceGps({
+                          maxTargetAccuracyMeters: 50,
+                          timeoutMs: 5000,
+                          onProgress: (info) => setGpsLiveStatus(info.statusText),
+                        });
+                        const addr = await fetchAddressFromCoords(res.latitude, res.longitude);
+                        setLogisticsToast({
+                          title: res.isUnder50m ? '🎯 Device GPS Verified (<50m)' : '📍 Device GPS Verified',
+                          message: `Latitude: ${res.latitude.toFixed(5)}, Longitude: ${res.longitude.toFixed(5)} (±${res.accuracyMeters}m ${res.isUnder50m ? 'under 50m verified ✓' : ''}). ${addr ? `Near: ${addr}` : ''}`,
+                        });
+                        if (mapSettings.mapEngine === 'google' && googleMapInstance) {
+                          googleMapInstance.panTo({ lat: res.latitude, lng: res.longitude });
+                          googleMapInstance.setZoom(16);
+                        } else if (mapInstanceRef.current) {
+                          mapInstanceRef.current.setView([res.latitude, res.longitude], 16, { animate: true });
+                        }
+                      } catch (err: any) {
+                        handleOpenLocationAccessRequest(err.message || 'GPS query failed.');
+                      } finally {
+                        setIsCapturingGps(false);
+                        setGpsLiveStatus(null);
+                      }
+                    }}
+                    disabled={isCapturingGps}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0"
+                  >
+                    <Navigation className="w-3.5 h-3.5" />
+                    <span>{isCapturingGps ? (gpsLiveStatus || 'Testing GPS (<50m)...') : '📍 Test Live GPS (<50m)'}</span>
+                  </button>
+                </div>
               </div>
 
               {/* 6. SUPPLY CHAIN & LOGISTICS NETWORK LAYERS */}
@@ -6436,11 +6329,7 @@ export default function RouteVisualization({
                   mapEngine: 'google',
                   googleMapType: 'roadmap',
                   mapTileLayer: 'standard',
-                  robotGpsEnabled: true,
-                  robotGpsMinAccuracy: 5,
-                  robotGpsSampleCount: 5,
-                  robotGpsOutlierFilter: true,
-                  robotGpsCaptureTheta: true,
+                  gpsHighAccuracy: true,
                   showGodownMarker: true,
                   showStockPickupPoints: true,
                   showDistributionLines: true,
@@ -7151,7 +7040,7 @@ export default function RouteVisualization({
                     </span>
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    Mark and manage your retail shops list, drop location pins on map, sync with robot GPS, and assign beat schedules (Monday to Sunday)
+                    Mark and manage your retail shops list, drop location pins on map, capture device GPS, and assign beat schedules (Monday to Sunday)
                   </p>
                 </div>
               </div>
@@ -7177,6 +7066,18 @@ export default function RouteVisualization({
                 >
                   <Crosshair className="w-3.5 h-3.5" />
                   <span>📍 Mark on Map</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowStoreManagerModal(false);
+                    setShowMapsGroundingModal(true);
+                  }}
+                  className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs border border-blue-400/30"
+                  title="Discover verified shops and markets nearby using Google Maps Grounding"
+                >
+                  <MapPin className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Google Maps AI</span>
                 </button>
                 <button
                   type="button"
@@ -7361,6 +7262,16 @@ export default function RouteVisualization({
                             </button>
                             <button
                               type="button"
+                              onClick={() => handleUpdateStoreLocationWithGps(st.id)}
+                              disabled={isCapturingGps}
+                              className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer border border-emerald-300 disabled:opacity-50"
+                              title="Update this store location using your current device GPS"
+                            >
+                              <Navigation className="w-3 h-3 text-emerald-600" />
+                              <span>Update GPS</span>
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleDeleteStore(st)}
                               className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-xs font-bold transition-colors flex items-center justify-center cursor-pointer border border-rose-200"
                               title="Delete this store location"
@@ -7396,8 +7307,19 @@ export default function RouteVisualization({
                             })}
                           </div>
 
-                          <div className="text-[11px] font-mono text-slate-400">
-                            GPS: {st.location.latitude.toFixed(4)}, {st.location.longitude.toFixed(4)}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-mono text-slate-500">
+                              GPS: {st.location.latitude.toFixed(4)}, {st.location.longitude.toFixed(4)}
+                            </span>
+                            {st.location.accuracyMeters !== undefined && (
+                              <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                                st.location.accuracyMeters <= 50
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : 'bg-amber-100 text-amber-800'
+                              }`}>
+                                ±{Math.round(st.location.accuracyMeters)}m {st.location.accuracyMeters <= 50 ? '✓ <50m' : ''}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -7559,30 +7481,31 @@ export default function RouteVisualization({
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <button
                       type="button"
-                      onClick={() => handleTriggerRobotGps('store')}
-                      className="px-2 py-0.5 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-700 hover:to-indigo-700 text-white rounded text-[10px] font-bold cursor-pointer flex items-center gap-1 shadow-xs"
-                      title="Sync shop coordinates with robot-grade multi-sample GPS lock"
+                      onClick={() => handleCaptureGpsLocation('store')}
+                      disabled={isCapturingGps}
+                      className="px-2.5 py-1 bg-gradient-to-r from-emerald-600 to-indigo-600 hover:from-emerald-700 hover:to-indigo-700 text-white rounded text-xs font-bold cursor-pointer flex items-center gap-1 shadow-xs disabled:opacity-50"
+                      title="Update shop location using your device GPS"
                     >
-                      <Bot className="w-3 h-3 animate-pulse" />
-                      <span>🤖 Robot GPS</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleCaptureCurrentGps('counter')}
-                      className="px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded text-[10px] font-bold cursor-pointer"
-                    >
-                      {isGettingGps ? 'Locking...' : '📍 Device GPS'}
+                      <Navigation className="w-3.5 h-3.5" />
+                      <span>{isCapturingGps ? 'Capturing GPS...' : '📍 Capture GPS'}</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleStartPinDropper('store')}
-                      className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded text-[10px] font-bold cursor-pointer flex items-center gap-1"
+                      className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded text-xs font-bold cursor-pointer flex items-center gap-1"
                     >
-                      <Crosshair className="w-3 h-3 text-amber-600" />
+                      <Crosshair className="w-3.5 h-3.5 text-amber-600" />
                       <span>🗺️ Mark on Map</span>
                     </button>
                   </div>
                 </div>
+
+                {isCapturingGps && gpsLiveStatus && (
+                  <div className="p-2.5 rounded-xl bg-cyan-50 border border-cyan-200 text-cyan-900 text-xs flex items-center gap-2 animate-pulse">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-700 shrink-0" />
+                    <span className="font-semibold">{gpsLiveStatus}</span>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -7607,6 +7530,43 @@ export default function RouteVisualization({
                       className="w-full px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs font-mono font-bold bg-white"
                     />
                   </div>
+                </div>
+
+                {/* Accuracy Status Badge */}
+                {storeFormAccuracy !== null && (
+                  <div className={`p-2 rounded-xl border flex items-center justify-between gap-2 text-xs ${
+                    storeFormAccuracy <= 50
+                      ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
+                      : 'bg-amber-50/80 border-amber-200 text-amber-900'
+                  }`}>
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <span className={`w-2.5 h-2.5 rounded-full ${storeFormAccuracy <= 50 ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                      <span>GPS Accuracy: ±{storeFormAccuracy} meters</span>
+                      {storeFormAccuracy <= 50 ? (
+                        <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-950 border border-emerald-300">
+                          Accurate Under 50m ✓
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-200 text-amber-900">
+                          Refining (Target &lt;50m)
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-mono">Hardware GNSS</span>
+                  </div>
+                )}
+
+                <div className="pt-1 flex items-center justify-between border-t border-slate-200/60">
+                  <span className="text-[10px] text-slate-500 font-medium">Standing in front of the shop?</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCaptureGpsLocation('store')}
+                    disabled={isCapturingGps}
+                    className="text-xs text-indigo-700 hover:text-indigo-900 font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  >
+                    <Navigation className="w-3 h-3 text-indigo-600" />
+                    <span>{isCapturingGps ? 'Capturing High Accuracy GPS...' : 'Update Location using Capture GPS (<50m)'}</span>
+                  </button>
                 </div>
               </div>
 
@@ -8609,6 +8569,16 @@ export default function RouteVisualization({
         );
       })()}
 
+      {/* GOOGLE MAPS GROUNDING MODAL (gemini-2.5-flash with googleMaps tool) */}
+      <MapsGroundingExplorerModal
+        isOpen={showMapsGroundingModal}
+        onClose={() => setShowMapsGroundingModal(false)}
+        currentLat={userLiveLocation?.lat || godownFacility.latitude || DEFAULT_DEPOT.latitude}
+        currentLng={userLiveLocation?.lng || godownFacility.longitude || DEFAULT_DEPOT.longitude}
+        defaultLocationName={godownFacility.name || 'Current Route Location'}
+        onAddStoreFromPlace={handleAddStoreFromGroundedPlace}
+      />
+
       {/* 7. GODOWN / MAIN WAREHOUSE MODAL */}
       <GodownModal
         godown={godownFacility}
@@ -8622,8 +8592,8 @@ export default function RouteVisualization({
           });
         }}
         onStartPinDrop={() => handleStartPinDropper('godown')}
-        onTriggerRobotGps={() => handleTriggerRobotGps('godown')}
-        isCapturingGps={robotGpsProgress?.active || false}
+        onCaptureGps={() => handleCaptureGpsLocation('godown')}
+        isCapturingGps={isCapturingGps}
       />
 
       {/* 8. STOCK PICKUP POINTS DIRECTORY MODAL */}
@@ -8650,7 +8620,7 @@ export default function RouteVisualization({
           setStockPickupPoints(prev => prev.filter(p => p.id !== pointId));
         }}
         onStartPinDropForPoint={(pointId) => handleStartPinDropper('pickup', pointId)}
-        onTriggerRobotGpsForPoint={(pointId) => handleTriggerRobotGps('pickup', pointId)}
+        onCaptureGpsForPoint={(pointId) => handleCaptureGpsLocation('pickup', pointId)}
         onZoomToPoint={(pt) => {
           if (mapSettings.mapEngine === 'google' && googleMapInstance) {
             googleMapInstance.panTo({ lat: pt.latitude, lng: pt.longitude });
@@ -8659,7 +8629,7 @@ export default function RouteVisualization({
             mapInstanceRef.current.setView([pt.latitude, pt.longitude], 16, { animate: true });
           }
         }}
-        isCapturingGps={robotGpsProgress?.active || false}
+        isCapturingGps={isCapturingGps}
       />
 
       {/* 9. DISTRIBUTION LINES NETWORK MODAL */}
@@ -8683,40 +8653,7 @@ export default function RouteVisualization({
         }}
       />
 
-      {/* 10. ROBOT GPS CALIBRATION & LIVE DIAGNOSTIC MODAL */}
-      <RobotGpsCalibrationModal
-        isOpen={showRobotCalibrationModal}
-        onClose={() => setShowRobotCalibrationModal(false)}
-        config={{
-          enabled: mapSettings.robotGpsEnabled,
-          minAccuracyMeters: mapSettings.robotGpsMinAccuracy || 5,
-          sampleCount: mapSettings.robotGpsSampleCount || 5,
-          timeoutMs: 15000,
-          outlierFilter: mapSettings.robotGpsOutlierFilter,
-        }}
-        onApplyCoords={(coords) => {
-          setGodownFacility(prev => ({
-            ...prev,
-            latitude: coords.lat,
-            longitude: coords.lng,
-            accuracyMeters: coords.accuracy,
-            thetaBearing: coords.thetaBearing,
-            updatedAt: new Date().toISOString(),
-          }));
-          setLogisticsToast({
-            title: '🏢 Robot Coordinates Applied to Godown',
-            message: `Locked at [${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}]${coords.thetaBearing !== undefined ? ` (θ=${coords.thetaBearing}°)` : ''} with ±${coords.accuracy}m error radius!`,
-          });
-        }}
-      />
-
-      {/* 11. ACTIVE ROBOT GPS SCANNING HUD */}
-      <RobotGpsHUD
-        progress={robotGpsProgress}
-        onCancel={() => setRobotGpsProgress(null)}
-      />
-
-      {/* 12. LOGISTICS INTERACTION FLOATING TOAST */}
+      {/* 10. LOGISTICS INTERACTION FLOATING TOAST */}
       {logisticsToast && (
         <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-2xl border border-indigo-500/40 flex items-center gap-3 animate-in fade-in slide-in-from-bottom-5 duration-300 max-w-sm">
           <div className="w-8 h-8 rounded-xl bg-indigo-600/30 text-indigo-400 flex items-center justify-center shrink-0 border border-indigo-400/30">
